@@ -1,4 +1,4 @@
-﻿<!-- index.html — ClockIn v2.0.4 (CROSS-BROWSER + INSTALLABLE PWA + SETTINGS OK) -->
+﻿<!-- index.html — ClockIn v2.1.0 (CROSS-BROWSER + INSTALLABLE PWA) -->
 <!doctype html>
 <html lang="es" data-theme="dark">
 <head>
@@ -8,19 +8,13 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="theme-color" content="#0b0b10" />
 
-  <!-- Android/Chromium legacy helpers -->
   <meta name="mobile-web-app-capable" content="yes" />
-
-  <!-- iOS -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="ClockIn" />
-
-  <!-- Windows -->
   <meta name="application-name" content="ClockIn" />
-  <meta name="msapplication-TileColor" content="#0b0b10" />
 
-  <meta name="description" content="ClockIn — PWA de fichaje: empleados, entrada/salida, pausas, resumen, historial, exportación CSV, PIN y offline." />
+  <meta name="description" content="ClockIn — PWA de fichaje: departamentos, 2 turnos, entrada/salida, pausas, resumen, historial, exportación CSV, PIN y offline." />
   <title>ClockIn</title>
 
   <link rel="manifest" href="manifest.webmanifest" />
@@ -29,15 +23,12 @@
   <link rel="apple-touch-icon" sizes="167x167" href="assets/icons/apple-touch-icon-167.png" />
   <link rel="apple-touch-icon" sizes="152x152" href="assets/icons/apple-touch-icon-152.png" />
 
-  <!-- Fonts + Material Symbols -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,650,0,0&display=swap" rel="stylesheet" />
 
-  <!-- ✅ Version global -->
-  <script>window.APP_VERSION = "2.0.4";</script>
+  <script>window.APP_VERSION = "2.1.0";</script>
 
-  <!-- Repair mode: /?repair (limpia SW + caches) -->
   <script>
     (function () {
       const qs = new URLSearchParams(location.search);
@@ -60,19 +51,17 @@
     })();
   </script>
 
-  <!-- ✅ Cache-bust (recomendado si tu SW NO ignora search en estáticos) -->
-  <link rel="stylesheet" href="styles.css?v=2.0.4" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
-  <!-- Splash / Loading -->
   <div class="splash" id="splash" aria-hidden="true">
     <div class="splash-card">
       <div class="splash-logo" aria-hidden="true"><span class="ms">schedule</span></div>
       <div class="splash-title">ClockIn</div>
       <div class="splash-sub" id="splashMsg">Cargando…</div>
       <div class="splash-bar" aria-hidden="true"><span></span></div>
-      <div class="splash-foot">v<span id="splashVer">2.0.4</span></div>
+      <div class="splash-foot">v<span id="splashVer">2.1.0</span></div>
 
       <div id="splashHelp" class="small muted" style="margin-top:10px; display:none;">
         Si esto se queda cargando, entra en <b>Repair</b> para limpiar caché/SW.
@@ -102,7 +91,6 @@
         <span class="ms">system_update</span> Actualización
       </button>
 
-      <!-- ✅ Install (Chrome/Edge/Android). iOS no dispara el prompt. -->
       <button class="iconbtn" id="btnInstall" hidden title="Instalar app" aria-label="Instalar app" type="button">
         <span class="ms">download</span>
       </button>
@@ -121,7 +109,6 @@
   </nav>
 
   <main class="main" id="appMain">
-    <!-- PANEL -->
     <section class="view" id="view-panel" data-route="panel">
       <div class="section-head">
         <h1>Empleados</h1>
@@ -140,7 +127,6 @@
       <div class="list" id="employeeList" aria-live="polite"></div>
     </section>
 
-    <!-- RESUMEN -->
     <section class="view" id="view-resumen" data-route="resumen" hidden>
       <div class="section-head">
         <h1>Resumen</h1>
@@ -170,7 +156,6 @@
       </div>
     </section>
 
-    <!-- HISTORIAL -->
     <section class="view" id="view-historial" data-route="historial" hidden>
       <div class="section-head">
         <h1>Historial</h1>
@@ -215,7 +200,6 @@
       </div>
     </section>
 
-    <!-- AJUSTES -->
     <section class="view" id="view-ajustes" data-route="ajustes" hidden>
       <div class="section-head">
         <h1>Ajustes</h1>
@@ -226,7 +210,6 @@
         <div>Estos ajustes se guardan en tu dispositivo (offline). PIN y backup protegen tus datos.</div>
       </div>
 
-      <!-- Preferencias -->
       <div class="card">
         <div class="card-title">Preferencias</div>
 
@@ -294,7 +277,6 @@
         </div>
       </div>
 
-      <!-- Geolocalización -->
       <div class="card">
         <div class="card-title">Ubicación</div>
         <div class="muted" style="margin-top:8px; line-height:1.55;">
@@ -313,7 +295,6 @@
         </div>
       </div>
 
-      <!-- Seguridad (PIN) -->
       <div class="card">
         <div class="card-title">Seguridad</div>
         <div class="muted" style="margin-top:8px; line-height:1.55;">
@@ -330,7 +311,6 @@
         </div>
       </div>
 
-      <!-- Datos -->
       <div class="card">
         <div class="card-title">Datos</div>
         <div class="muted" style="margin-top:8px; line-height:1.55;">
@@ -344,12 +324,11 @@
         </div>
       </div>
 
-      <!-- Administración de empleados -->
       <div class="card">
         <div class="row row-between" style="margin-bottom:10px;">
           <div>
             <div class="card-title" style="margin:0;">Empleados</div>
-            <div class="small muted">Edita el horario semanal o borra empleados.</div>
+            <div class="small muted">Edita el departamento y el horario semanal. Puedes usar 2 turnos: Mediodía y Tarde.</div>
           </div>
           <button class="btn btn-primary" id="btnAddEmp" type="button">
             <span class="ms">person_add</span> Añadir
@@ -357,30 +336,6 @@
         </div>
 
         <div class="list" id="employeeAdminList" aria-live="polite"></div>
-      </div>
-
-      <!-- App / Soporte -->
-      <div class="card">
-        <div class="card-title">App</div>
-        <div class="muted" style="margin-top:8px; line-height:1.55;">
-          Si notas estilos antiguos o comportamientos raros tras actualizar, usa <b>Repair</b> para limpiar SW/caché.
-        </div>
-
-        <div class="row" style="margin-top:12px; flex-wrap:wrap;">
-          <a class="btn btn-ghost" href="./?repair" title="Limpia Service Worker y cachés">
-            <span class="ms">construction</span> Repair
-          </a>
-          <button class="btn btn-ghost" type="button" id="btnReloadApp" title="Recargar">
-            <span class="ms">refresh</span> Recargar
-          </button>
-          <button class="btn btn-ghost" type="button" id="btnShowInstallHelp" title="Ayuda instalación">
-            <span class="ms">help</span> Instalar
-          </button>
-        </div>
-
-        <div class="small muted" style="margin-top:10px;">
-          Versión: <span class="mono">v<span id="uiVer"></span></span>
-        </div>
       </div>
 
       <div class="footer">
@@ -414,7 +369,6 @@
     </div>
   </noscript>
 
-  <!-- Watchdog: si se queda encima el splash, deja pasar -->
   <script>
     (function(){
       const help = document.getElementById("splashHelp");
@@ -437,77 +391,6 @@
     })();
   </script>
 
-  <!-- ✅ Instalación PWA (botón #btnInstall) + ayudas -->
-  <script>
-    (function(){
-      const btnInstall = document.getElementById("btnInstall");
-      const btnReload = document.getElementById("btnReloadApp");
-      const btnHelp = document.getElementById("btnShowInstallHelp");
-
-      let deferredPrompt = null;
-
-      if (btnReload){
-        btnReload.addEventListener("click", () => location.reload());
-      }
-
-      function isStandalone(){
-        try{
-          return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
-                 (window.navigator && window.navigator.standalone) || false;
-        }catch(_){ return false; }
-      }
-
-      function isIOS(){
-        const ua = navigator.userAgent || "";
-        return /iPhone|iPad|iPod/i.test(ua);
-      }
-
-      // Chrome/Edge/Android
-      window.addEventListener("beforeinstallprompt", (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        if (btnInstall && !isStandalone()){
-          btnInstall.hidden = false;
-        }
-      });
-
-      window.addEventListener("appinstalled", () => {
-        deferredPrompt = null;
-        if (btnInstall) btnInstall.hidden = true;
-      });
-
-      if (btnInstall){
-        btnInstall.addEventListener("click", async () => {
-          if (!deferredPrompt){
-            // Safari/iOS o navegador sin soporte
-            const msg = isIOS()
-              ? "En iPhone/iPad: pulsa Compartir (⬆️) y luego “Añadir a pantalla de inicio”."
-              : "Tu navegador no permite el instalador automático. Prueba Chrome/Edge o usa “Añadir a pantalla de inicio”.";
-            alert(msg);
-            return;
-          }
-          deferredPrompt.prompt();
-          try { await deferredPrompt.userChoice; } catch(_){}
-          deferredPrompt = null;
-          btnInstall.hidden = true;
-        });
-
-        // Si ya es standalone, no mostrar
-        if (isStandalone()) btnInstall.hidden = true;
-      }
-
-      if (btnHelp){
-        btnHelp.addEventListener("click", () => {
-          const msg = isIOS()
-            ? "iOS (Safari): Compartir (⬆️) → “Añadir a pantalla de inicio”."
-            : "Chrome/Edge: abre el menú del navegador → “Instalar app” / “Añadir a pantalla de inicio”.";
-          alert(msg);
-        });
-      }
-    })();
-  </script>
-
-  <!-- ✅ App (defer + cache-bust) -->
-  <script src="app.js?v=2.0.4" defer></script>
+  <script src="app.js"></script>
 </body>
 </html>

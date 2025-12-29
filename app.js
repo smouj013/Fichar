@@ -1,33 +1,37 @@
-/* app.js — ClockIn v2.0.4 (STABLE + UI PRO + PWA + INSTALL + AUTO-UPDATE)
-   ✅ Compat con tu index.html v2.0.3 (IDs/estructura) y styles.css v2.0.4
-   ✅ Fixes clave:
-   - Splash: NO bloquea nunca (pointer-events none + hidden+display none)
-   - Modal: hardHide seguro + evita “modal colgado”
-   - Routing: evita parpadeos/stack, anima solo el view activo
-   - Schedule editor: inputs type="time" con layout responsive sin depender de grid fijo
-   - Historial: paginación robusta + filtros estables
-   - Restore: normaliza schema + asegura schedule + settings + pin
-   - SW update: anti-loop + updatefound/waiting correctos
+/* app.js — ClockIn v2.1.0 (DEPTS + 2 SHIFTS + UI CLEAN + OPERA GX FIX)
+   ✅ Añade:
+   - Departamentos: Gerencia / Auxiliares / Repartidores (agrupado)
+   - Horario semanal en tabla con 2 turnos: Mediodía + Tarde
+   - Crear empleado: NO pierde el panel de horario (se crea dentro del modal)
+   - Colores de tarjeta: verde dentro / rojo fuera / gris sin iniciar hoy
+   - Opera GX: desactiva blur si detecta Opera (sin romper Chrome/Safari)
 */
-
 (() => {
   "use strict";
 
-  // ───────────────────────── Version / Guard ─────────────────────────
-  const APP_VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.0.4");
+  const APP_VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.1.0");
   const g = (typeof globalThis !== "undefined") ? globalThis : window;
-  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V204";
+  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V210";
   try { if (g && g[LOAD_GUARD]) return; if (g) g[LOAD_GUARD] = true; } catch (_) {}
 
-  // ───────────────────────── Storage ─────────────────────────
   const STORAGE_KEY = "clockin_state_v2";
   const LEGACY_KEYS = ["clockin_state_v1", "clockin_state_v1_0", "clockin_state_v1.0.0"];
 
-  // Días semana (ISO-like)
   const DOW_KEYS = ["mon","tue","wed","thu","fri","sat","sun"];
   const DOW_LABEL = { mon:"Lun", tue:"Mar", wed:"Mié", thu:"Jue", fri:"Vie", sat:"Sáb", sun:"Dom" };
 
-  // Tipos de evento
+  const SHIFT = { MID: "mid", EVE: "eve" };
+  const SHIFT_LABEL = { mid: "Mediodía", eve: "Tarde" };
+  const SHIFT_SHORT = { mid: "M", eve: "T" };
+
+  const DEPT = { GER: "gerencia", AUX: "auxiliares", REP: "repartidores" };
+  const DEPT_LABEL = {
+    [DEPT.GER]: "Gerencia",
+    [DEPT.AUX]: "Auxiliares de tienda",
+    [DEPT.REP]: "Repartidores"
+  };
+  const DEPT_ORDER = [DEPT.GER, DEPT.AUX, DEPT.REP];
+
   const EVT = {
     IN: "IN",
     OUT: "OUT",
@@ -35,7 +39,6 @@
     BREAK_END: "BREAK_END",
   };
 
-  // ───────────────────────── DOM helpers ─────────────────────────
   const $ = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
   const el = (tag, cls) => {
@@ -107,7 +110,6 @@
     return toISODate(d) === iso;
   }
 
-  // Hash corto (FNV-1a 32-bit)
   function fnv1a(str){
     let h = 0x811c9dc5;
     for (let i=0;i<str.length;i++){
@@ -142,25 +144,71 @@
     return s;
   }
 
-  // ───────────────────────── State schema ─────────────────────────
+  function normalizeDept(d){
+    if (d === DEPT.GER || d === DEPT.AUX || d === DEPT.REP) return d;
+    return DEPT.AUX;
+  }
+
   function defaultSchedule(){
     const s = {};
-    for (const k of DOW_KEYS) s[k] = { enabled: false, start: "09:00", end: "17:00" };
-    for (const k of ["mon","tue","wed","thu","fri"]) s[k].enabled = true;
+    for (const k of DOW_KEYS){
+      s[k] = {
+        mid: { enabled: false, start: "09:00", end: "14:00" },
+        eve: { enabled: false, start: "16:00", end: "20:00" }
+      };
+    }
+    for (const k of ["mon","tue","wed","thu","fri"]){
+      s[k].mid.enabled = true;
+    }
     return s;
+  }
+
+  function normalizeSchedule(s){
+    const out = defaultSchedule();
+
+    for (const k of DOW_KEYS){
+      const day = s && s[k];
+      if (!day) continue;
+
+      if (typeof day.enabled === "boolean" && typeof day.start === "string" && typeof day.end === "string"){
+        out[k].mid.enabled = !!day.enabled;
+        out[k].mid.start = day.start;
+        out[k].mid.end = day.end;
+        continue;
+      }
+
+      const mid = day.mid || day.med || day.mediodia || null;
+      const eve = day.eve || day.tar || day.tarde || null;
+
+      if (mid){
+        out[k].mid = {
+          enabled: !!mid.enabled,
+          start: typeof mid.start === "string" ? mid.start : out[k].mid.start,
+          end: typeof mid.end === "string" ? mid.end : out[k].mid.end
+        };
+      }
+      if (eve){
+        out[k].eve = {
+          enabled: !!eve.enabled,
+          start: typeof eve.start === "string" ? eve.start : out[k].eve.start,
+          end: typeof eve.end === "string" ? eve.end : out[k].eve.end
+        };
+      }
+    }
+    return out;
   }
 
   function defaultState(){
     return {
-      schema: 2,
+      schema: 3,
       version: APP_VERSION,
       createdAt: nowMs(),
       updatedAt: nowMs(),
       settings: {
-        theme: "system",          // system|dark|light
+        theme: "system",
         autoUpdate: true,
         confirmActions: true,
-        noteMode: "ask",          // ask|never
+        noteMode: "ask",
         compact: false,
         haptics: true,
         geoEnabled: false,
@@ -176,53 +224,6 @@
     };
   }
 
-  function normalizeSchedule(s){
-    const out = defaultSchedule();
-    for (const k of DOW_KEYS){
-      const d = s && s[k];
-      if (!d) continue;
-      out[k] = {
-        enabled: !!d.enabled,
-        start: typeof d.start === "string" ? d.start : out[k].start,
-        end: typeof d.end === "string" ? d.end : out[k].end
-      };
-    }
-    return out;
-  }
-
-  function normalizeState(parsed){
-    const base = defaultState();
-    const st = Object.assign(base, parsed || {});
-    st.schema = 2;
-    st.version = APP_VERSION;
-
-    st.settings = Object.assign(base.settings, (parsed && parsed.settings) || {});
-    st.settings.pin = Object.assign(base.settings.pin, (parsed && parsed.settings && parsed.settings.pin) || {});
-
-    st.employees = Array.isArray(parsed && parsed.employees)
-      ? parsed.employees.map(e => ({
-          id: String(e.id || uid()),
-          name: String(e.name || "Empleado"),
-          schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
-        }))
-      : [];
-
-    st.events = Array.isArray(parsed && parsed.events)
-      ? parsed.events.map(ev => ({
-          id: String(ev.id || uid()),
-          ts: Number(ev.ts || nowMs()),
-          empId: String(ev.empId || ""),
-          type: String(ev.type || EVT.IN),
-          note: typeof ev.note === "string" ? ev.note : "",
-          geo: (ev && ev.geo) ? ev.geo : null,
-          hash: String(ev.hash || fnv1a(String(ev.id||"") + "|" + String(ev.ts||"") + "|" + String(ev.empId||"") + "|" + String(ev.type||"")))
-        })).filter(x => x.empId && Number.isFinite(x.ts))
-      : [];
-
-    st.updatedAt = nowMs();
-    return st;
-  }
-
   function migrateLegacyIfNeeded(){
     for (const k of LEGACY_KEYS){
       const raw = localStorage.getItem(k);
@@ -231,7 +232,29 @@
       if (!localStorage.getItem(STORAGE_KEY)){
         const old = safeJsonParse(raw, null);
         if (old && typeof old === "object"){
-          const st = normalizeState(old);
+          const st = defaultState();
+
+          if (Array.isArray(old.employees)){
+            st.employees = old.employees.map(e => ({
+              id: String(e.id || uid()),
+              name: String(e.name || "Empleado"),
+              dept: normalizeDept(e.dept),
+              schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
+            }));
+          }
+
+          if (Array.isArray(old.events)){
+            st.events = old.events.map(ev => ({
+              id: String(ev.id || uid()),
+              ts: Number(ev.ts || nowMs()),
+              empId: String(ev.empId || ""),
+              type: String(ev.type || EVT.IN),
+              note: typeof ev.note === "string" ? ev.note : "",
+              geo: ev.geo || null,
+              hash: String(ev.hash || fnv1a(String(ev.id || "") + "|" + String(ev.ts || "")))
+            })).filter(x => x.empId && Number.isFinite(x.ts));
+          }
+
           saveState(st);
         }
       }
@@ -245,7 +268,38 @@
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? safeJsonParse(raw, null) : null;
     if (!parsed || typeof parsed !== "object") return defaultState();
-    return normalizeState(parsed);
+
+    const base = defaultState();
+    const st = Object.assign(base, parsed);
+
+    st.settings = Object.assign(base.settings, parsed.settings || {});
+    st.settings.pin = Object.assign(base.settings.pin, (parsed.settings && parsed.settings.pin) || {});
+
+    st.employees = Array.isArray(parsed.employees)
+      ? parsed.employees.map(e => ({
+          id: String(e.id || uid()),
+          name: String(e.name || "Empleado"),
+          dept: normalizeDept(e.dept),
+          schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
+        }))
+      : [];
+
+    st.events = Array.isArray(parsed.events)
+      ? parsed.events.map(ev => ({
+          id: String(ev.id || uid()),
+          ts: Number(ev.ts || nowMs()),
+          empId: String(ev.empId || ""),
+          type: String(ev.type || EVT.IN),
+          note: typeof ev.note === "string" ? ev.note : "",
+          geo: ev.geo || null,
+          hash: String(ev.hash || fnv1a(String(ev.id||"") + "|" + String(ev.ts||"")))
+        })).filter(x => x.empId && Number.isFinite(x.ts))
+      : [];
+
+    st.schema = 3;
+    st.version = APP_VERSION;
+    st.updatedAt = nowMs();
+    return st;
   }
 
   function saveState(st){
@@ -257,7 +311,6 @@
     }
   }
 
-  // ───────────────────────── UI: Toasts / Modal ─────────────────────────
   const toasts = $("#toasts");
   function toast(kind, msg, sub){
     if (!toasts) return;
@@ -274,6 +327,7 @@
     m.style.fontWeight = "900";
     m.style.marginBottom = sub ? "4px" : "0";
     m.textContent = msg || "";
+
     body.appendChild(m);
 
     if (sub){
@@ -285,8 +339,8 @@
 
     t.appendChild(ic);
     t.appendChild(body);
-    toasts.appendChild(t);
 
+    toasts.appendChild(t);
     setTimeout(() => { try { t.remove(); } catch(_) {} }, 4200);
   }
 
@@ -302,14 +356,13 @@
     if (!modalBackdrop) return;
     modalBackdrop.hidden = true;
     modalBackdrop.style.display = "none";
-    modalBackdrop.classList.remove("is-open");
     document.body.classList.remove("modal-open");
   }
 
   function closeModal(){
     if (!modalBackdrop) return;
-
     modalBackdrop.classList.remove("is-open");
+
     setTimeout(() => {
       modalBackdrop.hidden = true;
       modalBackdrop.style.display = "none";
@@ -361,7 +414,8 @@
 
   function confirmDialog(title, message, yesLabel="Confirmar", noLabel="Cancelar"){
     const wrap = el("div");
-    const p = el("div", "muted");
+    const p = el("div");
+    p.className = "muted";
     p.style.lineHeight = "1.55";
     p.textContent = message || "";
     wrap.appendChild(p);
@@ -380,13 +434,17 @@
     return openModal({ title, contentNode: wrap, actions: [no, yes] });
   }
 
-  // ───────────────────────── PIN hashing (WebCrypto) ─────────────────────────
   async function sha256Hex(str){
-    const enc = new TextEncoder();
-    const data = enc.encode(str);
-    const buf = await crypto.subtle.digest("SHA-256", data);
-    const arr = Array.from(new Uint8Array(buf));
-    return arr.map(b=>b.toString(16).padStart(2,"0")).join("");
+    try{
+      if (!crypto?.subtle) throw new Error("no-subtle");
+      const enc = new TextEncoder();
+      const data = enc.encode(str);
+      const buf = await crypto.subtle.digest("SHA-256", data);
+      const arr = Array.from(new Uint8Array(buf));
+      return arr.map(b=>b.toString(16).padStart(2,"0")).join("");
+    }catch(_){
+      return fnv1a("fallback|" + str) + fnv1a(str + "|fallback");
+    }
   }
 
   async function ensurePinOk(st, purposeLabel){
@@ -448,11 +506,11 @@
     });
 
     setTimeout(() => { try { input.focus(); } catch(_) {} }, 60);
+
     const res = await openModal({ title:"PIN requerido", contentNode: wrap, actions:[cancel, ok] });
     return !!res;
   }
 
-  // ───────────────────────── Detect device / mode + Install ─────────────────────────
   function isStandalone(){
     try{
       if (typeof navigator !== "undefined" && "standalone" in navigator && navigator.standalone) return true;
@@ -466,21 +524,24 @@
     const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
     const standalone = isStandalone();
 
-    let label = standalone ? "App" : ((isMobileUA || isTouch) ? "Móvil" : "Desktop");
     const isOpera = /OPR\//.test(ua) || /Opera/.test(ua);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(ua) && !isOpera;
+
+    let label = standalone ? "App" : ((isMobileUA || isTouch) ? "Móvil" : "Desktop");
     if (!standalone && isOpera) label += " (Opera)";
 
     document.body.classList.toggle("is-standalone", !!standalone);
     document.body.classList.toggle("is-mobile", !!(isMobileUA || isTouch));
     document.body.classList.toggle("is-desktop", !(isMobileUA || isTouch));
+    document.body.classList.toggle("is-opera", !!isOpera);
+    document.body.classList.toggle("is-safari", !!isSafari);
 
     const uiMode = $("#uiMode");
     if (uiMode) uiMode.textContent = label;
 
-    return { standalone, isTouch, isMobileUA, label };
+    return { standalone, isTouch, isMobileUA, isOpera, isSafari, label };
   }
 
-  // Install button (Chromium)
   const btnInstall = $("#btnInstall");
   let deferredInstallPrompt = null;
 
@@ -520,7 +581,6 @@
     });
   }
 
-  // ───────────────────────── Service Worker / Auto-update ─────────────────────────
   const btnUpdate = $("#btnUpdate");
   let swReg = null;
   let swWaiting = null;
@@ -547,13 +607,6 @@
       return;
     }
 
-    // Si al cargar ya hay waiting
-    if (swReg.waiting && navigator.serviceWorker.controller){
-      swWaiting = swReg.waiting;
-      showUpdatePill(st, true);
-      if (st.settings.autoUpdate) applyUpdateNow(st);
-    }
-
     swReg.addEventListener("updatefound", () => {
       const installing = swReg.installing;
       if (!installing) return;
@@ -569,6 +622,12 @@
       });
     });
 
+    if (swReg.waiting && navigator.serviceWorker.controller){
+      swWaiting = swReg.waiting;
+      showUpdatePill(st, true);
+      if (st.settings.autoUpdate) applyUpdateNow(st);
+    }
+
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (!canReloadNow()) return;
       markReloadGuard();
@@ -578,7 +637,6 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") swReg?.update().catch(()=>{});
     });
-
     setInterval(() => { swReg?.update().catch(()=>{}); }, 60 * 60 * 1000);
   }
 
@@ -608,7 +666,6 @@
     }
   }
 
-  // ───────────────────────── Geolocation (opcional) ─────────────────────────
   async function getGeoIfEnabled(st){
     if (!st.settings.geoEnabled) return null;
     if (!("geolocation" in navigator)) return null;
@@ -631,13 +688,12 @@
     });
   }
 
-  // ───────────────────────── Business logic ─────────────────────────
   function getEmployeeById(st, id){
     return st.employees.find(e => e.id === id) || null;
   }
 
   function todaysDOWKey(d){
-    const js = d.getDay(); // 0=Sun
+    const js = d.getDay();
     const map = { 0:"sun", 1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat" };
     return map[js];
   }
@@ -646,8 +702,26 @@
     const d = fromISODate(isoDate) || new Date();
     const k = todaysDOWKey(d);
     const s = (emp && emp.schedule && emp.schedule[k]) ? emp.schedule[k] : null;
-    if (!s || !s.enabled) return null;
-    return s;
+    if (!s) return null;
+
+    const mid = s.mid || null;
+    const eve = s.eve || null;
+
+    const out = {
+      mid: mid ? { enabled: !!mid.enabled, start: String(mid.start||"09:00"), end: String(mid.end||"14:00") } : { enabled:false, start:"09:00", end:"14:00" },
+      eve: eve ? { enabled: !!eve.enabled, start: String(eve.start||"16:00"), end: String(eve.end||"20:00") } : { enabled:false, start:"16:00", end:"20:00" }
+    };
+
+    if (!out.mid.enabled && !out.eve.enabled) return null;
+    return out;
+  }
+
+  function scheduleToText(s){
+    if (!s) return "Sin horario";
+    const parts = [];
+    if (s.mid?.enabled) parts.push(`${SHIFT_SHORT.mid} ${s.mid.start}–${s.mid.end}`);
+    if (s.eve?.enabled) parts.push(`${SHIFT_SHORT.eve} ${s.eve.start}–${s.eve.end}`);
+    return parts.length ? parts.join(" · ") : "Sin horario";
   }
 
   function getEventsForEmpOnDate(st, empId, isoDate){
@@ -657,43 +731,95 @@
   }
 
   function deriveDayStats(events, isoDate){
-    let inAt = null;
-    let outAt = null;
-    let breakStart = null;
-    let breakMins = 0;
+    const today = toISODate(new Date());
+    const isToday = isoDate === today;
+
+    let sessionIn = null;
+    let sessionBreakStart = null;
+    let sessionBreakMins = 0;
+
+    let totalBreakMins = 0;
+    let totalWorkedMins = 0;
+
+    let firstInAt = null;
+    let lastOutAt = null;
 
     for (const ev of events){
-      if (ev.type === EVT.IN) inAt = ev.ts;
-      if (ev.type === EVT.OUT) outAt = ev.ts;
-      if (ev.type === EVT.BREAK_START) breakStart = ev.ts;
+      if (ev.type === EVT.IN){
+        if (sessionIn == null){
+          sessionIn = ev.ts;
+          sessionBreakStart = null;
+          sessionBreakMins = 0;
+          if (!firstInAt) firstInAt = ev.ts;
+        }
+        continue;
+      }
+
+      if (ev.type === EVT.BREAK_START){
+        if (sessionIn != null && sessionBreakStart == null){
+          sessionBreakStart = ev.ts;
+        }
+        continue;
+      }
+
       if (ev.type === EVT.BREAK_END){
-        if (breakStart) breakMins += minutesBetween(breakStart, ev.ts);
-        breakStart = null;
+        if (sessionIn != null && sessionBreakStart != null){
+          sessionBreakMins += minutesBetween(sessionBreakStart, ev.ts);
+          sessionBreakStart = null;
+        }
+        continue;
+      }
+
+      if (ev.type === EVT.OUT){
+        if (sessionIn != null){
+          if (sessionBreakStart != null){
+            sessionBreakMins += minutesBetween(sessionBreakStart, ev.ts);
+            sessionBreakStart = null;
+          }
+          totalBreakMins += sessionBreakMins;
+          totalWorkedMins += Math.max(0, minutesBetween(sessionIn, ev.ts) - sessionBreakMins);
+          lastOutAt = ev.ts;
+
+          sessionIn = null;
+          sessionBreakMins = 0;
+        }
+        continue;
       }
     }
 
-    const today = toISODate(new Date());
-    const isToday = isoDate === today;
-    const endRef = isToday ? nowMs() : (outAt || null);
+    let breakOpen = false;
+    let isInside = false;
+    let inAt = firstInAt;
+    let outAt = lastOutAt;
 
-    if (breakStart && endRef){
-      breakMins += minutesBetween(breakStart, endRef);
+    if (sessionIn != null){
+      isInside = true;
+      const endRef = isToday ? nowMs() : null;
+
+      if (endRef){
+        if (sessionBreakStart != null){
+          sessionBreakMins += minutesBetween(sessionBreakStart, endRef);
+          sessionBreakStart = null;
+        }
+        totalBreakMins += sessionBreakMins;
+        totalWorkedMins += Math.max(0, minutesBetween(sessionIn, endRef) - sessionBreakMins);
+      }
+
+      breakOpen = (sessionBreakStart != null);
+      if (!inAt) inAt = sessionIn;
     }
 
-    let workedMins = 0;
-    if (inAt){
-      const end = outAt || (isToday ? nowMs() : null);
-      if (end) workedMins = Math.max(0, minutesBetween(inAt, end) - breakMins);
-    }
-
-    let status = "Fuera";
-    if (inAt && !outAt) status = breakStart ? "En pausa" : "Dentro";
-    if (inAt && outAt) status = "Cerrado";
+    const hasStarted = !!inAt || events.some(e => e.type === EVT.IN);
+    const status = !hasStarted ? "No iniciado" : (isInside ? "Dentro" : "Fuera");
 
     return {
-      inAt, outAt, breakMins, workedMins,
-      breakOpen: !!breakStart && !outAt,
-      isInside: !!inAt && !outAt,
+      inAt,
+      outAt,
+      breakMins: totalBreakMins,
+      workedMins: totalWorkedMins,
+      breakOpen,
+      isInside,
+      hasStarted,
       status
     };
   }
@@ -719,7 +845,6 @@
     try { navigator.vibrate && navigator.vibrate(12); } catch(_) {}
   }
 
-  // ───────────────────────── Render refs ─────────────────────────
   const splash = $("#splash");
   const splashMsg = $("#splashMsg");
   const splashVer = $("#splashVer");
@@ -775,7 +900,6 @@
   let histPage = 0;
   const HIST_PAGE_SIZE = 120;
 
-  // ───────────────────────── Theme / layout helpers ─────────────────────────
   function applyTheme(theme){
     if (!theme) theme = "system";
     let t = theme;
@@ -816,11 +940,18 @@
     uiCounts.textContent = `${n} empleados · ${inside} dentro`;
   }
 
-  function pillText(text, kind){
-    const p = el("span", "pill");
-    if (kind) p.classList.add(kind);
+  function pillText(text, extraClass){
+    const p = el("span", "pill" + (extraClass ? (" " + extraClass) : ""));
     p.textContent = text;
     return p;
+  }
+
+  function pillDept(dept){
+    const cls =
+      dept === DEPT.GER ? "dept dept-ger" :
+      dept === DEPT.REP ? "dept dept-rep" :
+      "dept dept-aux";
+    return pillText(DEPT_LABEL[dept] || "Auxiliares", cls);
   }
 
   function avatarText(name){
@@ -877,7 +1008,7 @@
 
     if (ds.isInside){
       if (st.settings.confirmActions){
-        const ok = await confirmDialog("Salida", `¿Cerrar salida de "${emp.name}" ahora?`, "Salida", "Cancelar");
+        const ok = await confirmDialog("Salida", `¿Registrar salida de "${emp.name}" ahora?`, "Salida", "Cancelar");
         if (!ok) return;
       }
 
@@ -940,12 +1071,25 @@
     refreshAll(st);
   }
 
-  // ───────────────────────── Panel render ─────────────────────────
+  function groupEmployeesByDept(st){
+    const map = new Map();
+    for (const d of DEPT_ORDER) map.set(d, []);
+    for (const emp of st.employees){
+      const d = normalizeDept(emp.dept);
+      if (!map.has(d)) map.set(d, []);
+      map.get(d).push(emp);
+    }
+    for (const d of map.keys()){
+      map.get(d).sort((a,b) => String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+    }
+    return map;
+  }
+
   function renderPanelEmployees(st){
     if (!employeeList) return;
     const today = toISODate(new Date());
-
     employeeList.innerHTML = "";
+
     if (!st.employees.length){
       const c = el("div", "card");
       const t = el("div", "card-title");
@@ -958,79 +1102,99 @@
       return;
     }
 
+    const groups = groupEmployeesByDept(st);
     const frag = document.createDocumentFragment();
 
-    for (const emp of st.employees){
-      const ev = getEventsForEmpOnDate(st, emp.id, today);
-      const ds = deriveDayStats(ev, today);
+    for (const dept of DEPT_ORDER){
+      const list = groups.get(dept) || [];
+      if (!list.length) continue;
 
-      const row = el("div", "emp");
+      const head = el("div", "group-head");
+      const left = el("div", "group-title");
+      left.textContent = DEPT_LABEL[dept] || "Empleados";
+      const meta = el("div", "group-meta");
+      meta.appendChild(pillText(`${list.length} · ${dept === DEPT.GER ? "Ger." : dept === DEPT.REP ? "Rep." : "Aux."}`));
+      head.appendChild(left);
+      head.appendChild(meta);
+      frag.appendChild(head);
 
-      const left = el("div", "emp-left");
-      const av = el("div", "avatar");
-      av.textContent = avatarText(emp.name);
+      for (const emp of list){
+        const ev = getEventsForEmpOnDate(st, emp.id, today);
+        const ds = deriveDayStats(ev, today);
 
-      const meta = el("div", "emp-meta");
-      const name = el("div", "emp-name");
-      name.textContent = emp.name;
+        const rowClass = !ds.hasStarted ? "emp emp--none" : (ds.isInside ? "emp emp--inside" : "emp emp--out");
+        const row = el("div", rowClass);
 
-      const sub = el("div", "emp-sub");
+        const leftBox = el("div", "emp-left");
+        const av = el("div", "avatar");
+        av.textContent = avatarText(emp.name);
 
-      const statusKind = ds.status === "Dentro" ? "ok" : (ds.status === "En pausa" ? "warn" : "");
-      sub.appendChild(pillText(ds.status, statusKind));
+        const metaBox = el("div", "emp-meta");
+        const name = el("div", "emp-name");
+        name.textContent = emp.name;
 
-      const sched = getScheduleForDate(emp, today);
-      sub.appendChild(pillText(sched ? `${sched.start}–${sched.end}` : "Sin horario"));
+        const sub = el("div", "emp-sub");
+        sub.appendChild(pillDept(normalizeDept(emp.dept)));
 
-      sub.appendChild(pillText(`E: ${ds.inAt ? fmtTime(new Date(ds.inAt)) : "—"}`));
-      sub.appendChild(pillText(`S: ${ds.outAt ? fmtTime(new Date(ds.outAt)) : "—"}`));
+        sub.appendChild(pillText(ds.status, ds.isInside ? "ok" : (!ds.hasStarted ? "" : "warn")));
 
-      if (ds.breakMins > 0 || ds.breakOpen){
-        sub.appendChild(pillText(`Pausa: ${fmtHMFromMinutes(ds.breakMins)}${ds.breakOpen ? " (…)" : ""}`, ds.breakOpen ? "warn" : ""));
+        const sched = getScheduleForDate(emp, today);
+        sub.appendChild(pillText(scheduleToText(sched)));
+
+        const inTxt = ds.inAt ? fmtTime(new Date(ds.inAt)) : "—";
+        const outTxt = ds.outAt ? fmtTime(new Date(ds.outAt)) : "—";
+        sub.appendChild(pillText(`E ${inTxt}`));
+        sub.appendChild(pillText(`S ${outTxt}`));
+
+        if (ds.workedMins > 0){
+          sub.appendChild(pillText(`Trab ${fmtHMFromMinutes(ds.workedMins)}`));
+        }
+        if (ds.breakMins > 0){
+          sub.appendChild(pillText(`Pausa ${fmtHMFromMinutes(ds.breakMins)}`));
+        }
+
+        metaBox.appendChild(name);
+        metaBox.appendChild(sub);
+
+        leftBox.appendChild(av);
+        leftBox.appendChild(metaBox);
+
+        const right = el("div", "emp-right");
+
+        const bInOut = el("button", "btn btn-primary");
+        bInOut.type = "button";
+        bInOut.dataset.action = "toggle-inout";
+        bInOut.dataset.empId = emp.id;
+        const ic = el("span", "ms");
+        ic.textContent = ds.isInside ? "logout" : "login";
+        bInOut.appendChild(ic);
+        bInOut.appendChild(document.createTextNode(ds.isInside ? "Salida" : "Entrada"));
+
+        const bBreak = el("button", "btn");
+        bBreak.type = "button";
+        bBreak.dataset.action = "toggle-break";
+        bBreak.dataset.empId = emp.id;
+        const icb = el("span", "ms");
+        icb.textContent = ds.breakOpen ? "play_arrow" : "pause";
+        bBreak.appendChild(icb);
+        bBreak.appendChild(document.createTextNode(ds.breakOpen ? "Fin pausa" : "Pausa"));
+        if (!ds.isInside) bBreak.disabled = true;
+
+        right.appendChild(bInOut);
+        right.appendChild(bBreak);
+
+        row.appendChild(leftBox);
+        row.appendChild(right);
+        frag.appendChild(row);
       }
-      if (ds.workedMins > 0){
-        sub.appendChild(pillText(`Trab: ${fmtHMFromMinutes(ds.workedMins)}`, "ok"));
-      }
 
-      meta.appendChild(name);
-      meta.appendChild(sub);
-
-      left.appendChild(av);
-      left.appendChild(meta);
-
-      const right = el("div", "emp-right");
-
-      const bInOut = el("button", "btn btn-primary");
-      bInOut.type = "button";
-      bInOut.dataset.action = "toggle-inout";
-      bInOut.dataset.empId = emp.id;
-      const ic = el("span", "ms");
-      ic.textContent = ds.isInside ? "logout" : "login";
-      bInOut.appendChild(ic);
-      bInOut.appendChild(document.createTextNode(ds.isInside ? "Salida" : "Entrada"));
-
-      const bBreak = el("button", "btn");
-      bBreak.type = "button";
-      bBreak.dataset.action = "toggle-break";
-      bBreak.dataset.empId = emp.id;
-      const icb = el("span", "ms");
-      icb.textContent = ds.breakOpen ? "play_arrow" : "pause";
-      bBreak.appendChild(icb);
-      bBreak.appendChild(document.createTextNode(ds.breakOpen ? "Fin pausa" : "Pausa"));
-      if (!ds.isInside) bBreak.disabled = true;
-
-      right.appendChild(bInOut);
-      right.appendChild(bBreak);
-
-      row.appendChild(left);
-      row.appendChild(right);
-      frag.appendChild(row);
+      const sep = el("div", "group-sep");
+      frag.appendChild(sep);
     }
 
     employeeList.appendChild(frag);
   }
 
-  // ───────────────────────── Admin render + CRUD ─────────────────────────
   function renderAdminEmployees(st){
     if (!employeeAdminList) return;
     employeeAdminList.innerHTML = "";
@@ -1042,242 +1206,289 @@
       return;
     }
 
+    const groups = groupEmployeesByDept(st);
     const frag = document.createDocumentFragment();
 
-    for (const emp of st.employees){
-      const card = el("div", "emp");
+    for (const dept of DEPT_ORDER){
+      const list = groups.get(dept) || [];
+      if (!list.length) continue;
 
-      const left = el("div", "emp-left");
-      const av = el("div", "avatar"); av.textContent = avatarText(emp.name);
+      const head = el("div", "group-head");
+      const left = el("div", "group-title");
+      left.textContent = DEPT_LABEL[dept] || "Empleados";
+      const meta = el("div", "group-meta");
+      meta.appendChild(pillText(`${list.length}`));
+      head.appendChild(left);
+      head.appendChild(meta);
+      frag.appendChild(head);
 
-      const meta = el("div", "emp-meta");
-      const name = el("div", "emp-name"); name.textContent = emp.name;
+      for (const emp of list){
+        const card = el("div", "emp emp--none");
 
-      const sub = el("div", "emp-sub");
-      const bits = [];
-      for (const k of DOW_KEYS){
-        const d = emp.schedule?.[k];
-        if (d && d.enabled) bits.push(`${DOW_LABEL[k]} ${d.start}-${d.end}`);
+        const leftBox = el("div", "emp-left");
+        const av = el("div", "avatar"); av.textContent = avatarText(emp.name);
+
+        const metaBox = el("div", "emp-meta");
+        const name = el("div", "emp-name"); name.textContent = emp.name;
+
+        const sub = el("div", "emp-sub");
+        sub.appendChild(pillDept(normalizeDept(emp.dept)));
+
+        const bits = [];
+        for (const k of DOW_KEYS){
+          const d = emp.schedule?.[k];
+          const parts = [];
+          if (d?.mid?.enabled) parts.push(`M ${d.mid.start}-${d.mid.end}`);
+          if (d?.eve?.enabled) parts.push(`T ${d.eve.start}-${d.eve.end}`);
+          if (parts.length) bits.push(`${DOW_LABEL[k]} ${parts.join(" · ")}`);
+        }
+        sub.appendChild(pillText(bits.length ? bits.join(" · ") : "Sin horario semanal"));
+
+        metaBox.appendChild(name);
+        metaBox.appendChild(sub);
+
+        leftBox.appendChild(av);
+        leftBox.appendChild(metaBox);
+
+        const right = el("div", "emp-right");
+        const bEdit = btnIcon("Editar", "edit", "btn", () => openEmployeeEditor(st, emp.id));
+        const bDel = btnIcon("Borrar", "delete", "btn btn-danger", () => deleteEmployee(st, emp.id));
+        right.appendChild(bEdit);
+        right.appendChild(bDel);
+
+        card.appendChild(leftBox);
+        card.appendChild(right);
+        frag.appendChild(card);
       }
-      sub.appendChild(pillText(bits.length ? bits.join(" · ") : "Sin horario semanal"));
 
-      meta.appendChild(name);
-      meta.appendChild(sub);
-
-      left.appendChild(av);
-      left.appendChild(meta);
-
-      const right = el("div", "emp-right");
-      const bEdit = btnIcon("Editar", "edit", "btn", () => openEditEmployee(st, emp.id));
-      const bDel = btnIcon("Borrar", "delete", "btn btn-danger", () => deleteEmployee(st, emp.id));
-      right.appendChild(bEdit);
-      right.appendChild(bDel);
-
-      card.appendChild(left);
-      card.appendChild(right);
-      frag.appendChild(card);
+      const sep = el("div", "group-sep");
+      frag.appendChild(sep);
     }
 
     employeeAdminList.appendChild(frag);
   }
 
-  async function openAddEmployee(st){
+  function buildScheduleTable(initialSchedule){
+    const schedule = normalizeSchedule(initialSchedule || defaultSchedule());
+
+    const wrap = el("div", "sched-wrap");
+    const tableWrap = el("div", "table-wrap");
+    const table = el("table", "sched-table");
+    table.setAttribute("role", "table");
+
+    const thead = document.createElement("thead");
+    const trh = document.createElement("tr");
+
+    const thDay = document.createElement("th"); thDay.textContent = "Día";
+    const thMid = document.createElement("th"); thMid.textContent = "Mediodía";
+    const thEve = document.createElement("th"); thEve.textContent = "Tarde";
+
+    trh.appendChild(thDay);
+    trh.appendChild(thMid);
+    trh.appendChild(thEve);
+    thead.appendChild(trh);
+
+    const tbody = document.createElement("tbody");
+
+    const controls = {};
+
+    for (const k of DOW_KEYS){
+      const tr = document.createElement("tr");
+
+      const tdDay = document.createElement("td");
+      tdDay.className = "sched-day";
+      tdDay.textContent = DOW_LABEL[k];
+
+      const mkShiftCell = (shiftKey, defaults) => {
+        const td = document.createElement("td");
+        const cell = el("div", "sched-cell");
+
+        const t = el("label", "toggle");
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.checked = !!defaults.enabled;
+        const sl = el("span", "slider");
+        t.appendChild(chk);
+        t.appendChild(sl);
+
+        const start = document.createElement("input");
+        start.className = "sched-time";
+        start.type = "time";
+        start.value = defaults.start;
+
+        const end = document.createElement("input");
+        end.className = "sched-time";
+        end.type = "time";
+        end.value = defaults.end;
+
+        const applyEnabled = () => {
+          const on = chk.checked;
+          start.disabled = !on;
+          end.disabled = !on;
+        };
+        chk.addEventListener("change", applyEnabled);
+        applyEnabled();
+
+        cell.appendChild(t);
+        cell.appendChild(start);
+        cell.appendChild(end);
+        td.appendChild(cell);
+
+        controls[k] = controls[k] || {};
+        controls[k][shiftKey] = { chk, start, end };
+        return td;
+      };
+
+      const day = schedule[k] || { mid:{enabled:false,start:"09:00",end:"14:00"}, eve:{enabled:false,start:"16:00",end:"20:00"} };
+      tr.appendChild(tdDay);
+      tr.appendChild(mkShiftCell(SHIFT.MID, day.mid || { enabled:false, start:"09:00", end:"14:00" }));
+      tr.appendChild(mkShiftCell(SHIFT.EVE, day.eve || { enabled:false, start:"16:00", end:"20:00" }));
+
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    wrap.appendChild(tableWrap);
+
+    const read = () => {
+      const out = defaultSchedule();
+      for (const k of DOW_KEYS){
+        const mid = controls[k]?.mid;
+        const eve = controls[k]?.eve;
+
+        const midStart = String(mid?.start?.value || "09:00");
+        const midEnd = String(mid?.end?.value || "14:00");
+        const eveStart = String(eve?.start?.value || "16:00");
+        const eveEnd = String(eve?.end?.value || "20:00");
+
+        const ps1 = parseHHMM(midStart);
+        const pe1 = parseHHMM(midEnd);
+        const ps2 = parseHHMM(eveStart);
+        const pe2 = parseHHMM(eveEnd);
+
+        if (mid?.chk?.checked && (!ps1 || !pe1)){
+          return { ok:false, error:`Horario inválido (Mediodía, ${DOW_LABEL[k]})` };
+        }
+        if (eve?.chk?.checked && (!ps2 || !pe2)){
+          return { ok:false, error:`Horario inválido (Tarde, ${DOW_LABEL[k]})` };
+        }
+
+        out[k] = {
+          mid: {
+            enabled: !!mid?.chk?.checked,
+            start: ps1 ? `${pad2(ps1.hh)}:${pad2(ps1.mm)}` : "09:00",
+            end: pe1 ? `${pad2(pe1.hh)}:${pad2(pe1.mm)}` : "14:00"
+          },
+          eve: {
+            enabled: !!eve?.chk?.checked,
+            start: ps2 ? `${pad2(ps2.hh)}:${pad2(ps2.mm)}` : "16:00",
+            end: pe2 ? `${pad2(pe2.hh)}:${pad2(pe2.mm)}` : "20:00"
+          }
+        };
+      }
+      return { ok:true, value: out };
+    };
+
+    return { node: wrap, read };
+  }
+
+  async function openEmployeeEditor(st, empId=null){
+    const isCreate = !empId;
+    const emp = isCreate ? null : getEmployeeById(st, empId);
+    if (!isCreate && !emp) return;
+
     const wrap = el("div");
 
-    const p = el("div", "muted");
-    p.style.lineHeight = "1.55";
-    p.textContent = "Crea un empleado. Puedes editar su horario semanal después.";
-    wrap.appendChild(p);
+    const intro = el("div", "muted");
+    intro.style.lineHeight = "1.55";
+    intro.textContent = isCreate
+      ? "Crea un empleado y define su departamento y horario semanal. Puedes activar Mediodía y/o Tarde por día."
+      : "Edita el departamento y el horario semanal. Puedes activar Mediodía y/o Tarde por día.";
+    wrap.appendChild(intro);
 
     const fName = el("label", "field");
     const s1 = el("span"); s1.textContent = "Nombre";
     const iName = document.createElement("input");
     iName.placeholder = "Ej: Laura García";
+    iName.value = emp ? emp.name : "";
     fName.appendChild(s1);
     fName.appendChild(iName);
 
-    wrap.appendChild(el("div")).style.height = "8px";
-    wrap.appendChild(fName);
-
-    const create = btnIcon("Crear", "person_add", "btn btn-primary", () => {
-      const name = String(iName.value || "").trim();
-      if (!name){ toast("warn", "Nombre requerido"); iName.focus(); return; }
-
-      const emp = { id: uid(), name, schedule: defaultSchedule() };
-      st.employees.push(emp);
-      saveState(st);
-
-      const r = modalResolve; modalResolve = null;
-      closeModal();
-      if (r) r(emp.id);
-    });
-
-    const cancel = btnIcon("Cancelar", "close", "btn btn-ghost", () => {
-      const r = modalResolve; modalResolve = null;
-      closeModal();
-      if (r) r(null);
-    });
-
-    setTimeout(() => { try { iName.focus(); } catch(_) {} }, 60);
-
-    const res = await openModal({ title:"Añadir empleado", contentNode: wrap, actions:[cancel, create] });
-    if (res){
-      toast("ok", "Empleado creado", "Ahora puedes editar el horario.");
-      refreshAll(st);
-      await openEditEmployee(st, res);
-    }
-  }
-
-  function makeScheduleRow(k, val){
-    const row = el("div");
-    row.style.display = "grid";
-    row.style.gridTemplateColumns = "1fr";
-    row.style.gap = "10px";
-    row.style.padding = "10px 12px";
-    row.style.border = "1px solid rgba(255,255,255,.08)";
-    row.style.borderRadius = "14px";
-    row.style.background = "rgba(255,255,255,.03)";
-
-    const top = el("div");
-    top.style.display = "flex";
-    top.style.alignItems = "center";
-    top.style.justifyContent = "space-between";
-    top.style.gap = "10px";
-
-    const label = el("div", "muted");
-    label.style.fontWeight = "900";
-    label.textContent = DOW_LABEL[k];
-
-    const boxWrap = el("div");
-    boxWrap.style.display = "flex";
-    boxWrap.style.gap = "10px";
-    boxWrap.style.alignItems = "center";
-
-    const t = el("label", "toggle");
-    const chk = document.createElement("input");
-    chk.type = "checkbox";
-    chk.checked = !!val.enabled;
-    const sl = el("span", "slider");
-    t.appendChild(chk);
-    t.appendChild(sl);
-
-    const lbl = el("div", "small muted");
-    lbl.textContent = chk.checked ? "Activo" : "Libre";
-
-    boxWrap.appendChild(t);
-    boxWrap.appendChild(lbl);
-
-    top.appendChild(label);
-    top.appendChild(boxWrap);
-
-    const timeRow = el("div");
-    timeRow.style.display = "grid";
-    timeRow.style.gridTemplateColumns = "1fr 1fr";
-    timeRow.style.gap = "10px";
-
-    const start = document.createElement("input");
-    start.type = "time";
-    start.value = val.start || "09:00";
-
-    const end = document.createElement("input");
-    end.type = "time";
-    end.value = val.end || "17:00";
-
-    start.style.width = "100%";
-    end.style.width = "100%";
-
-    const applyEnabled = () => {
-      const on = chk.checked;
-      start.disabled = !on;
-      end.disabled = !on;
-      lbl.textContent = on ? "Activo" : "Libre";
-      lbl.style.opacity = on ? "1" : ".8";
+    const fDept = el("label", "field");
+    const s2 = el("span"); s2.textContent = "Departamento";
+    const sel = document.createElement("select");
+    const makeOpt = (v, t) => {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = t;
+      return o;
     };
+    sel.appendChild(makeOpt(DEPT.GER, DEPT_LABEL[DEPT.GER]));
+    sel.appendChild(makeOpt(DEPT.AUX, DEPT_LABEL[DEPT.AUX]));
+    sel.appendChild(makeOpt(DEPT.REP, DEPT_LABEL[DEPT.REP]));
+    sel.value = normalizeDept(emp ? emp.dept : DEPT.AUX);
+    fDept.appendChild(s2);
+    fDept.appendChild(sel);
 
-    chk.addEventListener("change", applyEnabled);
-    applyEnabled();
-
-    timeRow.appendChild(start);
-    timeRow.appendChild(end);
-
-    row.appendChild(top);
-    row.appendChild(timeRow);
-
-    return { row, chk, start, end };
-  }
-
-  async function openEditEmployee(st, empId){
-    const emp = getEmployeeById(st, empId);
-    if (!emp) return;
-
-    const wrap = el("div");
-
-    const fName = el("label", "field");
-    const s1 = el("span"); s1.textContent = "Nombre";
-    const iName = document.createElement("input");
-    iName.value = emp.name;
-    fName.appendChild(s1);
-    fName.appendChild(iName);
-
-    const schTitle = el("div", "card-title");
-    schTitle.style.marginTop = "14px";
-    schTitle.textContent = "Horario semanal";
-
-    const sch = el("div", "grid");
-    const rows = {};
-    for (const k of DOW_KEYS){
-      const r = makeScheduleRow(k, emp.schedule?.[k] || { enabled:false, start:"09:00", end:"17:00" });
-      rows[k] = r;
-      sch.appendChild(r.row);
-    }
-
+    wrap.appendChild(el("div")).style.height = "10px";
     wrap.appendChild(fName);
-    wrap.appendChild(schTitle);
-    wrap.appendChild(sch);
+    wrap.appendChild(fDept);
 
-    const save = btnIcon("Guardar", "save", "btn btn-primary", () => {
+    const titleRow = el("div", "sched-title");
+    const tt = el("div", "card-title");
+    tt.textContent = "Horario semanal (tabla)";
+    const note = el("div", "sched-note");
+    note.textContent = "Activa/desactiva cada turno. Si no está activo, ese turno queda libre.";
+    titleRow.appendChild(tt);
+    titleRow.appendChild(note);
+
+    const { node: schedNode, read: readSchedule } = buildScheduleTable(emp ? emp.schedule : defaultSchedule());
+
+    wrap.appendChild(titleRow);
+    wrap.appendChild(schedNode);
+
+    const saveBtn = btnIcon(isCreate ? "Crear" : "Guardar", isCreate ? "person_add" : "save", "btn btn-primary", () => {
       const name = String(iName.value || "").trim();
       if (!name){ toast("warn", "Nombre requerido"); iName.focus(); return; }
 
-      emp.name = name;
-      emp.schedule = emp.schedule || defaultSchedule();
+      const dept = normalizeDept(sel.value);
 
-      for (const k of DOW_KEYS){
-        const r = rows[k];
-        const startV = String(r.start.value || "09:00");
-        const endV = String(r.end.value || "17:00");
-
-        const ps = parseHHMM(startV);
-        const pe = parseHHMM(endV);
-
-        if (r.chk.checked && (!ps || !pe)){
-          toast("warn", `Horario inválido (${DOW_LABEL[k]})`);
-          return;
-        }
-
-        emp.schedule[k] = {
-          enabled: !!r.chk.checked,
-          start: ps ? `${pad2(ps.hh)}:${pad2(ps.mm)}` : "09:00",
-          end: pe ? `${pad2(pe.hh)}:${pad2(pe.mm)}` : "17:00",
-        };
+      const schedRes = readSchedule();
+      if (!schedRes.ok){
+        toast("warn", schedRes.error || "Horario inválido");
+        return;
       }
 
-      saveState(st);
+      if (isCreate){
+        const newEmp = { id: uid(), name, dept, schedule: schedRes.value };
+        st.employees.push(newEmp);
+        saveState(st);
+        toast("ok", "Empleado creado", newEmp.name);
+      }else{
+        emp.name = name;
+        emp.dept = dept;
+        emp.schedule = schedRes.value;
+        saveState(st);
+        toast("ok", "Empleado actualizado", emp.name);
+      }
+
       const rsv = modalResolve; modalResolve = null;
       closeModal();
       if (rsv) rsv(true);
+
+      refreshAll(st);
     });
 
-    const cancel = btnIcon("Cerrar", "close", "btn btn-ghost", () => {
+    const cancelBtn = btnIcon("Cancelar", "close", "btn btn-ghost", () => {
       const rsv = modalResolve; modalResolve = null;
       closeModal();
       if (rsv) rsv(false);
     });
 
-    setTimeout(() => { try { iName.focus(); iName.select(); } catch(_) {} }, 60);
+    setTimeout(() => { try { iName.focus(); } catch(_) {} }, 60);
 
-    await openModal({ title:`Editar: ${emp.name}`, contentNode: wrap, actions:[cancel, save] });
-    refreshAll(st);
+    await openModal({ title: isCreate ? "Añadir empleado" : `Editar: ${emp.name}`, contentNode: wrap, actions:[cancelBtn, saveBtn] });
   }
 
   async function deleteEmployee(st, empId){
@@ -1296,15 +1507,13 @@
     refreshAll(st);
   }
 
-  // ───────────────────────── Resumen ─────────────────────────
   function renderSummary(st){
     if (!summaryTable) return;
     const tbody = $("tbody", summaryTable);
     if (!tbody) return;
-
     tbody.innerHTML = "";
-    const iso = (sumDate && sumDate.value) ? sumDate.value : toISODate(new Date());
 
+    const iso = (sumDate && sumDate.value) ? sumDate.value : toISODate(new Date());
     const frag = document.createDocumentFragment();
 
     for (const emp of st.employees){
@@ -1313,7 +1522,7 @@
       const tr = document.createElement("tr");
 
       const sched = getScheduleForDate(emp, iso);
-      const schedStr = sched ? `${sched.start}–${sched.end}` : "—";
+      const schedStr = sched ? scheduleToText(sched) : "—";
 
       const tdName = document.createElement("td"); tdName.textContent = emp.name;
       const tdSch = document.createElement("td"); tdSch.textContent = schedStr;
@@ -1341,7 +1550,6 @@
     }
   }
 
-  // ───────────────────────── Historial ─────────────────────────
   function computeFilteredEvents(st, filter){
     let arr = st.events.slice();
 
@@ -1441,7 +1649,6 @@
 
   function rebuildHistoryFilters(st){
     if (!fEmp) return;
-    const current = fEmp.value || "all";
     fEmp.innerHTML = "";
 
     const optAll = document.createElement("option");
@@ -1449,19 +1656,15 @@
     optAll.textContent = "Todos";
     fEmp.appendChild(optAll);
 
-    for (const emp of st.employees){
+    const arr = st.employees.slice().sort((a,b) => String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+    for (const emp of arr){
       const o = document.createElement("option");
       o.value = emp.id;
       o.textContent = emp.name;
       fEmp.appendChild(o);
     }
-
-    // intenta mantener selección
-    const stillExists = current === "all" || st.employees.some(e => e.id === current);
-    fEmp.value = stillExists ? current : "all";
   }
 
-  // ───────────────────────── CSV ─────────────────────────
   function exportSummaryCSV(st){
     const iso = (sumDate && sumDate.value) ? sumDate.value : toISODate(new Date());
     const lines = [];
@@ -1474,7 +1677,7 @@
 
       lines.push([
         emp.name,
-        sched ? `${sched.start}-${sched.end}` : "",
+        sched ? scheduleToText(sched).replace(/ · /g, " | ") : "",
         ds.inAt ? fmtTime(new Date(ds.inAt)) : "",
         ds.outAt ? fmtTime(new Date(ds.outAt)) : "",
         ds.breakMins ? fmtHMFromMinutes(ds.breakMins) : "",
@@ -1494,6 +1697,7 @@
     };
 
     const arr = computeFilteredEvents(st, filter);
+
     const lines = [];
     lines.push(["Fecha","Hora","Empleado","Tipo","Nota","Lat","Lon","Acc(m)","Hash"].map(csvEscape).join(","));
 
@@ -1517,7 +1721,6 @@
     downloadText(`clockin_eventos_${stamp}.csv`, lines.join("\n"), "text/csv;charset=utf-8");
   }
 
-  // ───────────────────────── Backup / Restore / Wipe ─────────────────────────
   async function doBackup(st){
     const ok = await ensurePinOk(st, "exportar (backup)");
     if (!ok) return;
@@ -1553,7 +1756,6 @@
     refreshAll(state);
   }
 
-  // ───────────────────────── Settings UI ─────────────────────────
   function applySettingsToUI(st){
     if (uiVer) uiVer.textContent = APP_VERSION;
     if (splashVer) splashVer.textContent = APP_VERSION;
@@ -1577,14 +1779,6 @@
       applyTheme(st.settings.theme);
       saveState(st);
     });
-
-    // Si el usuario cambia el tema del sistema con theme=system
-    try{
-      const mq = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
-      mq?.addEventListener?.("change", () => {
-        if (st.settings.theme === "system") applyTheme("system");
-      });
-    }catch(_){}
 
     optAutoUpdate?.addEventListener("change", () => {
       st.settings.autoUpdate = !!optAutoUpdate.checked;
@@ -1621,7 +1815,6 @@
     });
   }
 
-  // ───────────────────────── PIN UI ─────────────────────────
   async function openSetPin(st){
     const wrap = el("div");
 
@@ -1681,7 +1874,6 @@
       if (r) r(false);
     });
 
-    setTimeout(() => { try { i1.focus(); } catch(_) {} }, 60);
     await openModal({ title:"Configurar PIN", contentNode: wrap, actions:[cancel, ok] });
   }
 
@@ -1707,29 +1899,24 @@
     toast("ok","PIN eliminado");
   }
 
-  // ───────────────────────── Routing ─────────────────────────
   function showRoute(route){
     for (const t of tabs){
       t.classList.toggle("is-active", t.dataset.route === route);
     }
 
     for (const v of views){
-      const isTarget = v.dataset.route === route;
-      if (isTarget){
+      if (v.dataset.route === route){
         v.hidden = false;
         v.classList.add("view-enter");
         requestAnimationFrame(() => v.classList.add("is-entering"));
         setTimeout(() => v.classList.remove("view-enter", "is-entering"), 240);
-      }else{
-        // Oculta “sin animar” si ya estaba hidden; anima solo si estaba visible.
-        if (!v.hidden){
-          v.classList.add("view-exit");
-          requestAnimationFrame(() => v.classList.add("is-exiting"));
-          setTimeout(() => {
-            v.hidden = true;
-            v.classList.remove("view-exit", "is-exiting");
-          }, 220);
-        }
+      }else if (!v.hidden){
+        v.classList.add("view-exit");
+        requestAnimationFrame(() => v.classList.add("is-exiting"));
+        setTimeout(() => {
+          v.hidden = true;
+          v.classList.remove("view-exit", "is-exiting");
+        }, 220);
       }
     }
 
@@ -1743,7 +1930,6 @@
     }
   }
 
-  // ───────────────────────── Refresh ─────────────────────────
   function refreshAll(st){
     setHeaderDate();
     setOfflineBadge();
@@ -1755,7 +1941,6 @@
     renderHistory(st, true);
   }
 
-  // ───────────────────────── Binding ─────────────────────────
   function bindPanelActions(st){
     if (!employeeList) return;
 
@@ -1829,7 +2014,7 @@
   }
 
   function bindEmployeeButtons(st){
-    const openAdd = () => openAddEmployee(st);
+    const openAdd = () => openEmployeeEditor(st, null);
     btnQuickAdd?.addEventListener("click", openAdd);
     fabAdd?.addEventListener("click", openAdd);
     btnAddEmp?.addEventListener("click", openAdd);
@@ -1855,8 +2040,7 @@
           }
 
           try{
-            const norm = normalizeState(incoming);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(norm));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(incoming));
             state = loadState();
             applySettingsToUI(state);
             refreshAll(state);
@@ -1876,17 +2060,14 @@
     btnClearPin?.addEventListener("click", () => clearPin(st));
   }
 
-  // Close modal
   modalClose?.addEventListener("click", closeModal);
   modalBackdrop?.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && modalBackdrop && !modalBackdrop.hidden) closeModal(); });
 
-  // ───────────────────────── Online/Offline & ticks ─────────────────────────
   window.addEventListener("online", () => setOfflineBadge());
   window.addEventListener("offline", () => setOfflineBadge());
   setInterval(() => { setHeaderDate(); }, 60 * 1000);
 
-  // ───────────────────────── Splash FIX (Opera GX / overlays) ─────────────────────────
   function forceSplashNonBlocking(){
     if (!splash) return;
     splash.style.pointerEvents = "none";
@@ -1907,7 +2088,6 @@
     }, 260);
   }
 
-  // ───────────────────────── Init ─────────────────────────
   let state = loadState();
 
   function init(){
@@ -1936,9 +2116,6 @@
 
     rebuildHistoryFilters(state);
     refreshAll(state);
-
-    // Mantén el route inicial como Panel, por si algún navegador restaura scroll/estado raro
-    try { showRoute("panel"); } catch(_) {}
 
     hideSplash();
   }
