@@ -1,0 +1,165 @@
+<!doctype html>
+<!--
+  ClockIn — aplicación de fichaje
+  Desarrollado por Smouj013
+-->
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#0b0b10" />
+  <meta name="description" content="ClockIn — app para fichar (entrada/pausa/salida), calcular horas y exportar CSV." />
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css" />
+
+  <title>ClockIn</title>
+</head>
+
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">⏱️</div>
+        <div class="brandText">
+          <div class="title" id="companyName">ClockIn</div>
+          <div class="sub" id="employeeName">Sin usuario</div>
+        </div>
+      </div>
+
+      <div class="topActions">
+        <button class="btn ghost" id="btnSettings" title="Ajustes">⚙️</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="card statusCard">
+        <div class="statusRow">
+          <div class="statusLeft">
+            <div class="statusLabel">Estado</div>
+            <div class="statusValue" id="statusText">—</div>
+            <div class="statusMeta" id="statusMeta">—</div>
+          </div>
+
+          <div class="timerBox">
+            <div class="timerLabel">Tiempo</div>
+            <div class="timerValue" id="timerText">00:00:00</div>
+            <div class="timerHint" id="timerHint">—</div>
+          </div>
+        </div>
+
+        <div class="actionRow">
+          <button class="btn primary" id="btnIn">Entrar</button>
+          <button class="btn warn" id="btnBreakStart">Pausa</button>
+          <button class="btn warn" id="btnBreakEnd">Volver</button>
+          <button class="btn danger" id="btnOut">Salir</button>
+        </div>
+
+        <div class="minorRow">
+          <input class="input" id="noteInput" placeholder="Nota opcional (ej: médico, reunión, etc.)" maxlength="120" />
+          <button class="btn" id="btnAddNote">Añadir nota al último</button>
+        </div>
+
+        <div class="integrityRow" id="integrityRow" hidden>
+          <span class="badge bad">⚠️ Integridad</span>
+          <span class="integrityText" id="integrityText">Se detectó una inconsistencia en el historial.</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardHead">
+          <div>
+            <div class="cardTitle">Resumen</div>
+            <div class="cardSub">Horas por día (entrada/salida + pausas)</div>
+          </div>
+
+          <div class="cardActions">
+            <button class="btn" id="btnExport">Exportar CSV</button>
+            <button class="btn ghost" id="btnClear">Borrar todo</button>
+          </div>
+        </div>
+
+        <div class="days" id="days"></div>
+      </section>
+
+      <section class="card">
+        <div class="cardHead">
+          <div>
+            <div class="cardTitle">Eventos</div>
+            <div class="cardSub">Registro cronológico (append-only)</div>
+          </div>
+          <div class="cardActions">
+            <button class="btn ghost" id="btnExportRaw">Exportar eventos (CSV)</button>
+          </div>
+        </div>
+
+        <div class="events" id="events"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footLeft">
+        <span class="pill" id="pwaPill">PWA</span>
+        <span class="pill" id="offlinePill">Offline listo</span>
+        <span class="pill" id="versionPill">v1.0</span>
+      </div>
+      <div class="footRight">
+        <button class="link" id="btnInstall" hidden>Instalar</button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Modal Ajustes -->
+  <div class="modalBackdrop" id="settingsBackdrop" hidden></div>
+  <div class="modal" id="settingsModal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modalHead">
+      <div>
+        <div class="modalTitle" id="settingsTitle">Ajustes</div>
+        <div class="modalSub">Nombre, empresa y opciones</div>
+      </div>
+      <button class="btn ghost" id="btnCloseSettings">✕</button>
+    </div>
+
+    <div class="modalBody">
+      <label class="field">
+        <span>Empresa</span>
+        <input class="input" id="inpCompany" placeholder="Ej: Mi Empresa S.L." maxlength="40" />
+      </label>
+
+      <label class="field">
+        <span>Empleado</span>
+        <input class="input" id="inpEmployee" placeholder="Ej: Juan Pérez" maxlength="40" />
+      </label>
+
+      <label class="field row">
+        <span>Solicitar PIN para exportar/borrar</span>
+        <input type="checkbox" id="chkPin" />
+      </label>
+
+      <label class="field">
+        <span>PIN (4–10 dígitos)</span>
+        <input class="input" id="inpPin" inputmode="numeric" placeholder="••••" maxlength="10" />
+        <div class="hint">Si activas el PIN, se pedirá para exportar o borrar.</div>
+      </label>
+
+      <label class="field row">
+        <span>Guardar ubicación (opcional)</span>
+        <input type="checkbox" id="chkGeo" />
+      </label>
+
+      <div class="smallNote">
+        Consejo: para que el Service Worker funcione, abre con <b>http/https</b> (no file://).
+      </div>
+    </div>
+
+    <div class="modalFoot">
+      <button class="btn ghost" id="btnCancelSettings">Cancelar</button>
+      <button class="btn primary" id="btnSaveSettings">Guardar</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
