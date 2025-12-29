@@ -1,19 +1,15 @@
 {
   "name": "ClockIn",
   "short_name": "ClockIn",
-  "description": "ClockIn — PWA de fichaje: empleados, entrada/salida, pausas, resumen, historial, CSV, PIN y offline.",
-  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#0b0b10",
   "theme_color": "#0b0b10",
-  "categories": ["business", "productivity", "utilities"],
-  "orientation": "portrait-primary",
+  "description": "ClockIn — PWA de fichaje: empleados, entrada/salida, pausas, resumen, historial, exportación CSV, PIN y offline.",
   "icons": [
-    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "assets/icons/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
     { "src": "assets/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]

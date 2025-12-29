@@ -1,8 +1,14 @@
-/* sw.js — ClockIn v2.0.0 (AUTO-UPDATE estable + offline) */
+/* sw.js — ClockIn v2.0.1 (AUTO-UPDATE estable + offline)
+   - Precaching tolerante (no rompe install si falta un archivo)
+   - Navegación: network-first con timeout + fallback cache
+   - Estáticos: cache-first + refresh background (stale refresh)
+   - Runtime: stale-while-revalidate
+*/
+
 (() => {
   "use strict";
 
-  const VERSION = "2.0.0";
+  const VERSION = "2.0.1";
   const CACHE = `clockin-${VERSION}`;
 
   // Precaching (misma ruta/origen)
@@ -24,24 +30,21 @@
 
   async function safePrecache(cache){
     // No dejes que un archivo faltante rompa el install.
-    // (Muy típico cuando cambian iconos o rutas)
     const reqs = CORE.map(u => new Request(u, { cache: "reload" }));
-    const results = await Promise.allSettled(
-      reqs.map(async (req) => {
+    await Promise.allSettled(reqs.map(async (req) => {
+      try{
         const res = await fetch(req);
         if (!res || !res.ok) return;
         await cache.put(req, res.clone());
-      })
-    );
-    // results se ignora a propósito (silent)
-    return results;
+      }catch(_){}
+    }));
   }
 
   self.addEventListener("install", (e) => {
     e.waitUntil((async () => {
       const c = await caches.open(CACHE);
       await safePrecache(c);
-      // No hacemos skipWaiting aquí (evita loops raros en iOS)
+      // No skipWaiting aquí: reduce loops raros en iOS
     })());
   });
 
@@ -120,7 +123,7 @@
       return;
     }
 
-    // Default: stale-while-revalidate
+    // Default runtime: stale-while-revalidate
     e.respondWith((async () => {
       const c = await caches.open(CACHE);
       const cached = await c.match(req);

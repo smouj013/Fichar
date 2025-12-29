@@ -1,9 +1,10 @@
-/* styles.css — ClockIn v2.0.0 (UI PRO)
-   - Background “mesh glow” animado + ruido
+/* styles.css — ClockIn v2.0.1 (UI PRO)
+   - Fondo “mesh glow” animado + ruido sutil
    - Cards glass + sombras suaves
    - Botones con jerarquía real (primary/ghost/danger)
    - Animaciones: tabs/views/modal/toasts/splash
    - Responsive + compact mode + reduced motion
+   - Safe-area iOS + tablas cómodas
 */
 
 :root{
@@ -19,8 +20,6 @@
   --border: rgba(255,255,255,.10);
   --border-2: rgba(255,255,255,.14);
 
-  --blur: 14px;
-
   --ease-out: cubic-bezier(.22,.9,.18,1);
   --ease-in: cubic-bezier(.65,0,.35,1);
 
@@ -31,7 +30,7 @@
   --font: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
-  /* Accent base (se recalcula por tema) */
+  /* Accent base */
   --acc: 110 244 181;     /* green mint */
   --acc2: 94 196 255;     /* blue */
   --danger: 255 86 86;
@@ -44,6 +43,9 @@
   --text: rgba(255,255,255,.92);
   --muted: rgba(255,255,255,.64);
   --muted2: rgba(255,255,255,.50);
+
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
 }
 
 :root[data-theme="light"]{
@@ -70,6 +72,7 @@ body{
   color: var(--text);
   background: var(--bg);
   overflow-x: hidden;
+  padding-bottom: var(--safe-b);
 }
 
 /* Scrollbar (desktop) */
@@ -149,7 +152,7 @@ body::before{
   position: sticky;
   top: 0;
   z-index: 10;
-  padding: 14px 16px;
+  padding: calc(14px + var(--safe-t)) 16px 14px;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -200,7 +203,7 @@ body::before{
 /* Tabs */
 .tabs{
   position: sticky;
-  top: 68px;
+  top: calc(68px + var(--safe-t));
   z-index: 9;
   padding: 10px 12px 12px;
   display:flex;
@@ -222,7 +225,7 @@ body::before{
   color: var(--muted);
   border-radius: 999px;
   padding: 10px 12px;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 13px;
   display:flex;
   align-items:center;
@@ -253,12 +256,12 @@ body::before{
 
 /* Main */
 .main{
-  padding: 16px 16px 92px;
+  padding: 16px 16px calc(92px + var(--safe-b));
   max-width: 1100px;
   margin: 0 auto;
 }
 
-/* Views transitions (se activan con patch JS) */
+/* Views transitions */
 .view{
   transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
 }
@@ -297,7 +300,7 @@ body::before{
   border: 1px solid var(--border);
   background: rgba(255,255,255,.06);
   color: var(--muted);
-  font-weight: 700;
+  font-weight: 800;
   font-size: 12px;
 }
 .badge-soft{
@@ -336,7 +339,7 @@ body::before{
 .card + .card{ margin-top: 14px; }
 
 .card-title{
-  font-weight: 800;
+  font-weight: 900;
   font-size: 14px;
   letter-spacing: .2px;
   margin: 0 0 10px;
@@ -360,7 +363,7 @@ body::before{
 
 /* Fields */
 .field{ display:grid; gap: 8px; }
-.field > span{ font-weight: 800; font-size: 12px; color: var(--muted); letter-spacing:.2px; }
+.field > span{ font-weight: 900; font-size: 12px; color: var(--muted); letter-spacing:.2px; }
 .field input,
 .field select,
 .field textarea{
@@ -439,7 +442,7 @@ body::before{
   color: var(--text);
   border-radius: 14px;
   padding: 10px 12px;
-  font-weight: 800;
+  font-weight: 900;
   font-size: 13px;
   cursor:pointer;
   display:inline-flex;
@@ -506,7 +509,7 @@ body::before{
   border: 1px solid var(--border);
   background: rgba(255,255,255,.06);
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 900;
   font-size: 12px;
   box-shadow: var(--shadow-inset);
 }
@@ -526,7 +529,7 @@ body::before{
   color: var(--text);
   border-radius: 999px;
   padding: 10px 12px;
-  font-weight: 800;
+  font-weight: 900;
   font-size: 13px;
 }
 
@@ -620,7 +623,7 @@ body.compact .pill{ padding: 7px 10px; }
 .table{
   width: 100%;
   border-collapse: collapse;
-  min-width: 780px;
+  min-width: 820px;
   background: rgba(255,255,255,.03);
 }
 .table th, .table td{
@@ -629,6 +632,7 @@ body.compact .pill{ padding: 7px 10px; }
   border-bottom: 1px solid rgba(255,255,255,.06);
   font-size: 13px;
   color: var(--text);
+  vertical-align: top;
 }
 .table th{
   position: sticky;
@@ -658,7 +662,7 @@ body.compact .pill{ padding: 7px 10px; }
 .fab{
   position: fixed;
   right: 16px;
-  bottom: 18px;
+  bottom: calc(18px + var(--safe-b));
   width: 58px;
   height: 58px;
   border-radius: 18px;
@@ -686,7 +690,7 @@ body.compact .pill{ padding: 7px 10px; }
 .toast-zone{
   position: fixed;
   left: 16px;
-  bottom: 16px;
+  bottom: calc(16px + var(--safe-b));
   display:grid;
   gap: 10px;
   z-index: 30;
@@ -864,9 +868,9 @@ body.modal-open{
 
 /* Mobile tighten */
 @media (max-width: 520px){
-  .topbar{ padding: 12px 12px; }
-  .tabs{ top: 64px; padding: 10px 10px 12px; }
-  .main{ padding: 14px 12px 92px; }
+  .topbar{ padding: calc(12px + var(--safe-t)) 12px 12px; }
+  .tabs{ top: calc(64px + var(--safe-t)); padding: 10px 10px 12px; }
+  .main{ padding: 14px 12px calc(92px + var(--safe-b)); }
   .emp{ padding: 12px; }
   .btn{ padding: 10px 10px; }
 }
