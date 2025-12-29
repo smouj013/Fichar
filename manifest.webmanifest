@@ -1,12 +1,16 @@
 {
   "name": "ClockIn",
   "short_name": "ClockIn",
-  "start_url": "./",
+  "id": "./?app=clockin",
+  "start_url": "./?source=pwa",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
   "background_color": "#0b0b10",
   "theme_color": "#0b0b10",
   "description": "ClockIn — PWA de fichaje: empleados, entrada/salida, pausas, resumen, historial, exportación CSV, PIN y offline.",
+  "lang": "es",
+  "orientation": "portrait-primary",
   "icons": [
     { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
