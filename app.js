@@ -1,11 +1,4 @@
-/* app.js — ClockIn v2.0.0 (STABLE + PWA + AUTO-UPDATE + UI PRO + ANIM)
-   ✅ Reforzado:
-   - Guard anti doble carga
-   - Modal con animación (class is-open) + cierre suave
-   - Transiciones entre vistas/tabs (enter/exit)
-   - Toasts: dismiss por click + animación sin “saltos”
-   - Inyección opcional de background .bg-glow (si no existe en index)
-*/
+/* app.js — ClockIn v2.0.0 (STABLE + PWA + AUTO-UPDATE + UI PRO) */
 (() => {
   "use strict";
 
@@ -29,14 +22,15 @@
   const CR = (typeof globalThis !== "undefined" && globalThis.crypto) ? globalThis.crypto : null;
 
   const prefersReducedMotion = (() => {
-    try { return !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
-    catch (_) { return false; }
+    try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+    catch(_) { return false; }
   })();
 
   // ───────────────────────── Helpers ─────────────────────────
   function $(sel, root){ return (root || document).querySelector(sel); }
   function $$(sel, root){ return Array.from((root || document).querySelectorAll(sel)); }
   function pad2(n){ return String(n).padStart(2,"0"); }
+  function now(){ return Date.now(); }
 
   function safeReplaceAll(s, a, b) {
     s = String(s);
@@ -53,8 +47,6 @@
     s = safeReplaceAll(s, "'", "&#39;");
     return s;
   }
-
-  function now(){ return Date.now(); }
 
   function uid(){
     try { if (CR && typeof CR.randomUUID === "function") return CR.randomUUID(); } catch(_) {}
@@ -97,7 +89,6 @@
 
   // ───────────────────────── Splash / Fatal ─────────────────────────
   const ui = {};
-
   function setSplash(msg){
     if (!ui.splashMsg) return;
     if (msg) ui.splashMsg.textContent = msg;
@@ -343,7 +334,6 @@
 
     const el = document.createElement("div");
     el.className = "toast";
-    el.setAttribute("role", "status");
     el.innerHTML = `
       <div class="ticon">${escapeHtml(icon || "ℹ️")}</div>
       <div>
@@ -351,20 +341,11 @@
         ${sub ? `<div class="tsub">${escapeHtml(sub)}</div>` : ""}
       </div>
     `;
-
-    // click-to-dismiss (pro)
-    el.addEventListener("click", () => {
-      try { el.style.opacity = "0"; el.style.transform = "translateY(6px)"; } catch(_) {}
-      setTimeout(() => { try { el.remove(); } catch(_) {} }, prefersReducedMotion ? 0 : 240);
-    });
-
     zone.appendChild(el);
 
-    const t1 = prefersReducedMotion ? 800 : 2600;
-    const t2 = prefersReducedMotion ? 900 : 3200;
-
-    setTimeout(()=>{ try { el.style.opacity="0"; el.style.transform="translateY(6px)"; } catch(_) {} }, t1);
-    setTimeout(()=>{ try{ el.remove(); }catch(_){ } }, t2);
+    const ttl = prefersReducedMotion ? 2200 : 2600;
+    setTimeout(()=>{ el.style.opacity="0"; el.style.transform="translateY(6px)"; }, ttl);
+    setTimeout(()=>{ try{ el.remove(); }catch(_){ } }, ttl + 650);
   }
 
   function openModal(title, bodyNode, actions){
@@ -381,7 +362,8 @@
     mb.hidden = false;
     document.body.classList.add("modal-open");
 
-    // ✅ animación (CSS: .modal-backdrop.is-open .modal)
+    // clase para transiciones CSS (.modal-backdrop.is-open ...)
+    mb.classList.remove("is-open");
     if (!prefersReducedMotion){
       requestAnimationFrame(()=> mb.classList.add("is-open"));
     } else {
@@ -394,21 +376,24 @@
     }, 0);
   }
 
-  function closeModal(){
+  function closeModal(force){
     const mb = ui.modalBackdrop;
     if (!mb) return;
 
-    mb.classList.remove("is-open");
     document.body.classList.remove("modal-open");
 
-    const hideDelay = prefersReducedMotion ? 0 : 180;
+    if (force || prefersReducedMotion){
+      mb.classList.remove("is-open");
+      mb.hidden = true;
+      try{ ui.modalBody.innerHTML=""; ui.modalActions.innerHTML=""; }catch(_){}
+      return;
+    }
+
+    mb.classList.remove("is-open");
     setTimeout(()=>{
       mb.hidden = true;
-      try{
-        ui.modalBody.innerHTML = "";
-        ui.modalActions.innerHTML = "";
-      }catch(_){}
-    }, hideDelay);
+      try{ ui.modalBody.innerHTML=""; ui.modalActions.innerHTML=""; }catch(_){}
+    }, 180);
   }
 
   function mkBtn(label, cls, onClick){
@@ -471,45 +456,96 @@
   function computeDay(empId, dayKey){
     const evs = eventsForEmpDay(empId, dayKey);
 
-    let firstIn=null, lastOut=null;
-    let workMs=0, breakMs=0;
-    let workStart=null, breakStart=null;
+    let firstIn = null;
+    let lastOut = null;
+
+    let workMs = 0;
+    let breakMs = 0;
+
+    let phase = "OUT"; // OUT | IN | BREAK
+    let workStart = null;
+    let breakStart = null;
+
+    let lastType = null;
 
     for (const ev of evs){
-      if (ev.type==="IN"){
-        if (!firstIn) firstIn=ev.ts;
+      lastType = ev.type;
+
+      if (ev.type === "IN"){
+        if (!firstIn) firstIn = ev.ts;
+
+        // si estamos en OUT/DONE -> empezar trabajo
+        if (phase !== "IN"){
+          phase = "IN";
+          workStart = ev.ts;
+          breakStart = null;
+        } else {
+          // doble IN accidental: ignora
+        }
+
+      } else if (ev.type === "BREAK_START"){
+        if (phase === "IN" && workStart != null){
+          workMs += Math.max(0, ev.ts - workStart);
+          workStart = null;
+        }
+        if (phase !== "BREAK"){
+          phase = "BREAK";
+          breakStart = ev.ts;
+        }
+
+      } else if (ev.type === "BREAK_END"){
+        if (phase === "BREAK" && breakStart != null){
+          breakMs += Math.max(0, ev.ts - breakStart);
+          breakStart = null;
+        }
+        phase = "IN";
         workStart = ev.ts;
-        breakStart = null;
-      } else if (ev.type==="BREAK_START"){
-        if (workStart!=null){ workMs += Math.max(0, ev.ts-workStart); workStart=null; }
-        if (breakStart==null) breakStart=ev.ts;
-      } else if (ev.type==="BREAK_END"){
-        if (breakStart!=null){ breakMs += Math.max(0, ev.ts-breakStart); breakStart=null; }
-        if (workStart==null) workStart=ev.ts;
-      } else if (ev.type==="OUT"){
-        if (breakStart!=null){ breakMs += Math.max(0, ev.ts-breakStart); breakStart=null; }
-        if (workStart!=null){ workMs += Math.max(0, ev.ts-workStart); workStart=null; }
+
+      } else if (ev.type === "OUT"){
+        if (phase === "BREAK" && breakStart != null){
+          breakMs += Math.max(0, ev.ts - breakStart);
+          breakStart = null;
+        }
+        if (phase === "IN" && workStart != null){
+          workMs += Math.max(0, ev.ts - workStart);
+          workStart = null;
+        }
+        phase = "OUT";
         lastOut = ev.ts;
       }
     }
 
     const n = now();
-    const isToday = (dayKey===dateKeyLocal(n));
+    const isToday = (dayKey === dateKeyLocal(n));
     if (isToday){
-      if (breakStart!=null) breakMs += Math.max(0, n-breakStart);
-      if (workStart!=null) workMs += Math.max(0, n-workStart);
+      if (phase === "BREAK" && breakStart != null) breakMs += Math.max(0, n - breakStart);
+      if (phase === "IN" && workStart != null) workMs += Math.max(0, n - workStart);
     }
 
-    let status="No fichado";
-    let phase="OUT"; // OUT | IN | BREAK | DONE
-    if (firstIn && !lastOut){
-      if (breakStart!=null){ status="En pausa"; phase="BREAK"; }
-      else { status="Trabajando"; phase="IN"; }
-    } else if (firstIn && lastOut){
-      status="Finalizado"; phase="DONE";
+    let status = "No fichado";
+    let uiPhase = "OUT"; // OUT | IN | BREAK | DONE
+
+    if (!firstIn){
+      status = "No fichado";
+      uiPhase = "OUT";
+    } else if (phase === "BREAK"){
+      status = "En pausa";
+      uiPhase = "BREAK";
+    } else if (phase === "IN"){
+      status = "Trabajando";
+      uiPhase = "IN";
+    } else {
+      // phase OUT, pero con eventos
+      if (lastType === "OUT"){
+        status = "Finalizado";
+        uiPhase = "DONE";
+      } else {
+        status = "No fichado";
+        uiPhase = "OUT";
+      }
     }
 
-    return { firstIn, lastOut, workMs, breakMs, status, phase };
+    return { firstIn, lastOut, workMs, breakMs, status, phase: uiPhase };
   }
 
   function scheduleStr(emp, dowKey){
@@ -959,7 +995,7 @@
     const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
     const bOk = mkBtn(`<span class="ms">delete_forever</span> Borrar todo`,"btn btn-danger", ()=>{
       try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
-      closeModal();
+      closeModal(true);
       location.reload();
     });
     openModal("Confirmar borrado total", wrap, [bCancel,bOk]);
@@ -978,6 +1014,8 @@
   function setRoute(route){
     route = String(route || "panel");
     if (route === currentRoute) return;
+
+    closeModal(true);
 
     const from = currentRoute;
     currentRoute = route;
@@ -1032,6 +1070,18 @@
     ui.uiCounts.textContent = `${state.employees.length} empleado(s)`;
 
     const frag = document.createDocumentFragment();
+
+    if (!state.employees.length){
+      const empty = document.createElement("div");
+      empty.className = "card";
+      empty.innerHTML = `
+        <div class="card-title">Sin empleados</div>
+        <div class="muted small">Añade un empleado para empezar a fichar.</div>
+      `;
+      frag.appendChild(empty);
+      ui.employeeList.appendChild(frag);
+      return;
+    }
 
     for (const emp of state.employees){
       const d = computeDay(emp.id, dayKey);
@@ -1291,14 +1341,18 @@
   }
 
   function renderAll(){
+    if (!state) return;
+
     ui.uiDate.textContent = prettyDateLong(now());
     ui.uiOffline.hidden = navigator.onLine;
 
-    const active = currentRoute || ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
-    if (active==="panel") renderPanel();
-    if (active==="resumen") renderResumen();
-    if (active==="historial") renderHistorial();
-    if (active==="ajustes") renderAjustes();
+    // mostrar vista activa si el HTML no lo hizo ya
+    $$(".view").forEach(v => v.hidden = (v.dataset.route !== currentRoute));
+
+    if (currentRoute==="panel") renderPanel();
+    if (currentRoute==="resumen") renderResumen();
+    if (currentRoute==="historial") renderHistorial();
+    if (currentRoute==="ajustes") renderAjustes();
   }
 
   // ───────────────────────── Service Worker (AUTO-UPDATE sin loops) ─────────────────────────
@@ -1316,11 +1370,13 @@
 
       const showUpdate = ()=>{
         ui.btnUpdate.hidden = false;
+
         if (state.settings.autoUpdate){
           setTimeout(()=>{
+            // no forzar update si hay un modal abierto (mejor UX)
             if (ui.modalBackdrop && !ui.modalBackdrop.hidden) return;
             applyUpdate(reg);
-          }, 700);
+          }, prefersReducedMotion ? 0 : 700);
         }
       };
 
@@ -1458,26 +1514,15 @@
     });
   }
 
-  // ───────────────────────── UI extras ─────────────────────────
-  function ensureBackgroundGlow(){
-    // si no existe en index, lo inyecta (no rompe nada)
-    try{
-      if ($(".bg-glow")) return;
-      const el = document.createElement("div");
-      el.className = "bg-glow";
-      document.body.appendChild(el);
-    }catch(_){}
-  }
-
   // ───────────────────────── DOM Ready ─────────────────────────
   document.addEventListener("DOMContentLoaded", () => {
     try {
-      ensureBackgroundGlow();
-
       // refs splash
       ui.splash = $("#splash");
       ui.splashMsg = $("#splashMsg");
       ui.splashVer = $("#splashVer");
+      ui.splashHelp = $("#splashHelp");
+      ui.btnForceHideSplash = $("#btnForceHideSplash");
       if (ui.splashVer) ui.splashVer.textContent = VERSION;
 
       setSplash("Inicializando…");
@@ -1540,6 +1585,19 @@
       ui.filePicker = $("#filePicker");
       ui.modalClose = $("#modalClose");
 
+      // splash watchdog / “forzar entrada”
+      if (ui.btnForceHideSplash && ui.splashHelp){
+        ui.btnForceHideSplash.addEventListener("click", ()=>{
+          try { hideSplash(); } catch(_) {}
+        });
+        setTimeout(()=>{
+          if (ui.splash && !ui.splash.classList.contains("is-hidden")){
+            ui.splashHelp.hidden = false;
+          }
+        }, 4500);
+      }
+
+      // comprobación mínima (sin romper por detalles menores)
       const required = [
         ui.uiDate, ui.uiCounts, ui.uiOffline, ui.uiVer,
         ui.employeeList, ui.employeeAdminList,
@@ -1557,10 +1615,13 @@
         ui.btnAddEmp, ui.btnQuickAdd, ui.fabAdd,
         ui.filePicker, ui.modalClose
       ];
-      if (required.some(x=>!x)) throw new Error("Faltan elementos en index.html (IDs/estructura incorrecta).");
+      const missing = required.map((x,i)=>({x,i})).filter(o=>!o.x);
+      if (missing.length){
+        throw new Error("Faltan elementos en index.html (IDs/estructura incorrecta). Revisa que estás usando el index v2.0.0.");
+      }
 
       // modal close
-      ui.modalClose.addEventListener("click", closeModal);
+      ui.modalClose.addEventListener("click", ()=>closeModal());
       initModalGuards();
 
       // state
@@ -1571,13 +1632,15 @@
       applyTheme();
       hookThemeListener();
 
+      // compact
+      document.body.classList.toggle("compact", !!state.settings.compact);
+
       // tabs
       $$(".tab").forEach(btn => btn.addEventListener("click", ()=>setRoute(btn.dataset.route)));
 
-      // route inicial (si el HTML marca un tab activo, lo respeta)
-      currentRoute = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
-      // asegurar visibilidad correcta de vistas en boot (por si el HTML viene mal)
-      $$(".view").forEach(v => v.hidden = (v.dataset.route !== currentRoute));
+      // init route from HTML (si ya hay uno activo)
+      const activeTab = $$(".tab").find(t=>t.classList.contains("is-active"));
+      currentRoute = activeTab?.dataset.route || currentRoute;
 
       // add employee
       const openAdd = ()=>addOrEditEmployeeFlow(null);
@@ -1611,9 +1674,8 @@
       // backup/restore
       ui.btnBackup.addEventListener("click", backupJSON);
 
-      ui.btnRestore.addEventListener("click", async ()=>{
-        const ok = await requirePinIfSet("Importar backup JSON está protegido por PIN (si está activo).");
-        if (!ok) return;
+      // ✅ evita doble PIN: el PIN se pide dentro de restoreJSON(file)
+      ui.btnRestore.addEventListener("click", ()=>{
         ui.filePicker.value = "";
         ui.filePicker.click();
       });
