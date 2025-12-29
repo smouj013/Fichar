@@ -8,7 +8,7 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="theme-color" content="#0b0b10" />
 
-  <!-- Android/Chromium legacy helpers (no molestan y ayudan a algunos) -->
+  <!-- Android/Chromium legacy helpers -->
   <meta name="mobile-web-app-capable" content="yes" />
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -17,7 +17,6 @@
   <meta name="application-name" content="ClockIn" />
 
   <meta name="description" content="ClockIn — PWA de fichaje: empleados, entrada/salida, pausas, resumen, historial, exportación CSV, PIN y offline." />
-
   <title>ClockIn</title>
 
   <link rel="manifest" href="manifest.webmanifest" />
@@ -97,7 +96,7 @@
         <span class="ms">system_update</span> Actualización
       </button>
 
-      <!-- ✅ Install (solo se muestra si el navegador lo soporta) -->
+      <!-- Install (si se usa en tu app.js futuro; si no, no molesta) -->
       <button class="iconbtn" id="btnInstall" hidden title="Instalar app" aria-label="Instalar app" type="button">
         <span class="ms">download</span>
       </button>
@@ -116,6 +115,7 @@
   </nav>
 
   <main class="main" id="appMain">
+    <!-- PANEL -->
     <section class="view" id="view-panel" data-route="panel">
       <div class="section-head">
         <h1>Empleados</h1>
@@ -134,6 +134,7 @@
       <div class="list" id="employeeList" aria-live="polite"></div>
     </section>
 
+    <!-- RESUMEN -->
     <section class="view" id="view-resumen" data-route="resumen" hidden>
       <div class="section-head">
         <h1>Resumen</h1>
@@ -163,6 +164,7 @@
       </div>
     </section>
 
+    <!-- HISTORIAL -->
     <section class="view" id="view-historial" data-route="historial" hidden>
       <div class="section-head">
         <h1>Historial</h1>
@@ -207,14 +209,160 @@
       </div>
     </section>
 
+    <!-- AJUSTES (COMPLETO + IDs requeridos por app.js) -->
     <section class="view" id="view-ajustes" data-route="ajustes" hidden>
-      <div class="section-head"><h1>Ajustes</h1></div>
-      <!-- (tu contenido de ajustes aquí tal cual, sin cambios) -->
-      <div class="footer"><span class="muted">ClockIn v<span id="uiVer"></span></span></div>
+      <div class="section-head">
+        <h1>Ajustes</h1>
+      </div>
+
+      <div class="hint">
+        <span class="dot"></span>
+        <div>Estos ajustes se guardan en tu dispositivo (offline). PIN y backup protegen tus datos.</div>
+      </div>
+
+      <!-- Preferencias -->
+      <div class="card">
+        <div class="card-title">Preferencias</div>
+
+        <div class="grid" style="margin-top:10px;">
+          <label class="field">
+            <span>Tema</span>
+            <select id="optTheme">
+              <option value="system">Sistema</option>
+              <option value="dark">Oscuro</option>
+              <option value="light">Claro</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Notas en fichajes</span>
+            <select id="optNoteMode">
+              <option value="ask">Preguntar</option>
+              <option value="never">Nunca</option>
+            </select>
+          </label>
+
+          <label class="field" style="align-items:center;">
+            <span>Auto-update</span>
+            <div class="row" style="justify-content:flex-start;">
+              <label class="toggle" title="Aplica actualizaciones automáticamente si hay una lista">
+                <input id="optAutoUpdate" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+              <span class="small muted">Aplicar al detectar update</span>
+            </div>
+          </label>
+
+          <label class="field" style="align-items:center;">
+            <span>Confirmar acciones</span>
+            <div class="row" style="justify-content:flex-start;">
+              <label class="toggle" title="Pide confirmación antes de entrada/salida/borrados">
+                <input id="optConfirmActions" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+              <span class="small muted">Evita errores</span>
+            </div>
+          </label>
+
+          <label class="field" style="align-items:center;">
+            <span>Modo compacto</span>
+            <div class="row" style="justify-content:flex-start;">
+              <label class="toggle">
+                <input id="optCompact" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+              <span class="small muted">Más densidad</span>
+            </div>
+          </label>
+
+          <label class="field" style="align-items:center;">
+            <span>Haptics (vibración)</span>
+            <div class="row" style="justify-content:flex-start;">
+              <label class="toggle">
+                <input id="optHaptics" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+              <span class="small muted">Móvil compatible</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Geolocalización -->
+      <div class="card">
+        <div class="card-title">Ubicación</div>
+        <div class="muted" style="margin-top:8px; line-height:1.55;">
+          Si activas esto, cada evento puede guardar lat/lon aproximados (si el navegador lo permite).
+        </div>
+
+        <div class="row" style="margin-top:12px; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-weight:900;">Geolocalización</div>
+            <div class="small muted">Se guarda junto al evento</div>
+          </div>
+          <label class="toggle" title="Activar geolocalización">
+            <input id="tglGeo" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Seguridad (PIN) -->
+      <div class="card">
+        <div class="card-title">Seguridad</div>
+        <div class="muted" style="margin-top:8px; line-height:1.55;">
+          El PIN protege: <b>borrado total</b>, <b>backup</b> e <b>importación</b>. Se guarda hasheado.
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          <button class="btn btn-primary" id="btnSetPin" type="button">
+            <span class="ms">lock</span> Configurar PIN
+          </button>
+          <button class="btn btn-ghost" id="btnClearPin" type="button" title="Quitar PIN">
+            <span class="ms">lock_open</span> Quitar PIN
+          </button>
+        </div>
+      </div>
+
+      <!-- Datos -->
+      <div class="card">
+        <div class="card-title">Datos</div>
+        <div class="muted" style="margin-top:8px; line-height:1.55;">
+          Backup/Restore te permite mover los datos entre dispositivos. “Borrar todo” elimina empleados y eventos locales.
+        </div>
+
+        <div class="row" style="margin-top:12px; flex-wrap:wrap;">
+          <button class="btn" id="btnBackup" type="button"><span class="ms">upload</span> Backup</button>
+          <button class="btn" id="btnRestore" type="button"><span class="ms">download</span> Restore</button>
+          <button class="btn btn-danger" id="btnWipe" type="button"><span class="ms">delete_forever</span> Borrar todo</button>
+        </div>
+      </div>
+
+      <!-- Administración de empleados (usa employeeAdminList + btnAddEmp) -->
+      <div class="card">
+        <div class="row row-between" style="margin-bottom:10px;">
+          <div>
+            <div class="card-title" style="margin:0;">Empleados</div>
+            <div class="small muted">Edita el horario semanal o borra empleados.</div>
+          </div>
+          <button class="btn btn-primary" id="btnAddEmp" type="button">
+            <span class="ms">person_add</span> Añadir
+          </button>
+        </div>
+
+        <div class="list" id="employeeAdminList" aria-live="polite"></div>
+      </div>
+
+      <div class="footer">
+        <span class="muted">ClockIn v<span id="uiVer"></span></span>
+      </div>
     </section>
   </main>
 
-  <button class="fab" id="fabAdd" aria-label="Añadir empleado" title="Añadir empleado" type="button"><span class="ms">add</span></button>
+  <button class="fab" id="fabAdd" aria-label="Añadir empleado" title="Añadir empleado" type="button">
+    <span class="ms">add</span>
+  </button>
+
   <div class="toast-zone" id="toasts" aria-live="polite" aria-relevant="additions"></div>
 
   <div class="modal-backdrop" id="modalBackdrop" hidden>
@@ -231,7 +379,9 @@
   <input type="file" id="filePicker" accept="application/json" hidden />
 
   <noscript>
-    <div style="padding:16px; color:#fff; background:#111; font-family:system-ui">Esta app necesita JavaScript activado.</div>
+    <div style="padding:16px; color:#fff; background:#111; font-family:system-ui">
+      Esta app necesita JavaScript activado.
+    </div>
   </noscript>
 
   <!-- Watchdog: si se queda encima el splash, deja pasar -->
