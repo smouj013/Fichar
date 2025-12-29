@@ -1,406 +1,257 @@
-<!doctype html>
-<!--
-  Panel de Fichaje (PWA) — Smouj013
-  Vista general: lista de empleados + fichaje por fila + horario semanal
--->
-<html lang="es">
+﻿<!doctype html>
+<html lang="es" data-theme="dark">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no" />
   <meta name="color-scheme" content="dark light" />
+  <meta name="format-detection" content="telephone=no" />
   <meta name="theme-color" content="#0b0b10" />
-  <meta name="description" content="Panel de fichaje: empleados, turnos semanales y fichaje por día con entrada/salida." />
 
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ClockIn" />
 
-  <title>Panel de Fichaje — Smouj013</title>
+  <meta name="description" content="ClockIn — app PWA de fichaje con múltiples empleados, horarios semanales, resumen diario, historial, export CSV, PIN y modo offline." />
+
+  <title>ClockIn</title>
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="assets/icons/favicon-32.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon-180.png" />
+  <link rel="apple-touch-icon" sizes="167x167" href="assets/icons/apple-touch-icon-167.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="assets/icons/apple-touch-icon-152.png" />
+
+  <script>window.APP_VERSION = "2.0.1";</script>
+
+  <!-- Repair mode: /?repair (borra SW + caches) -->
+  <script>
+    (function () {
+      const qs = new URLSearchParams(location.search);
+      if (!qs.has("repair")) return;
+      (async () => {
+        try {
+          if ("serviceWorker" in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister()));
+          }
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          }
+          alert("Repair OK: Service Worker y cachés borrados.\nAhora recarga (Ctrl+F5).");
+        } catch (e) {
+          alert("Repair: error borrando cachés/SW.\n" + (e && e.message ? e.message : e));
+        }
+      })();
+    })();
+  </script>
+
+  <link rel="stylesheet" href="styles.css?v=2.0.1" />
 </head>
 
 <body>
-  <noscript>
-    <div class="noscript">Necesitas JavaScript activado para usar esta app.</div>
-  </noscript>
+  <div class="bg-glow" aria-hidden="true"></div>
 
-  <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="logo">🕒</div>
-        <div class="brandText">
-          <div class="title" id="companyName">Panel de Fichaje</div>
-          <div class="sub" id="subTitle">Vista general</div>
-        </div>
-      </div>
-
-      <div class="topActions">
-        <div class="topStatus">
-          <div class="statusPill" id="liveClock">—</div>
-        </div>
-        <button class="btn ghost" id="btnExportDay" type="button" title="Exportar día">⬇️ Día</button>
-        <button class="btn ghost" id="btnExportWeek" type="button" title="Exportar semana">⬇️ Semana</button>
-        <button class="btn ghost" id="btnSettings" type="button" title="Ajustes">⚙️</button>
-      </div>
-    </header>
-
-    <main class="main">
-      <section class="card controls">
-        <div class="controlsRow">
-          <div class="dateBox">
-            <div class="label">Fecha</div>
-            <div class="dateRow">
-              <button class="btn" id="btnPrevDay" type="button">◀</button>
-              <input class="input" id="datePicker" type="date" />
-              <button class="btn" id="btnNextDay" type="button">▶</button>
-              <button class="btn ghost" id="btnToday" type="button">Hoy</button>
-            </div>
-            <div class="hint" id="dateHint">—</div>
-          </div>
-
-          <div class="searchBox">
-            <div class="label">Buscar</div>
-            <input class="input" id="searchInput" placeholder="Filtrar por nombre…" maxlength="40" />
-            <div class="hint">Tip: escribe “ana”, “carlos”…</div>
-          </div>
-        </div>
-
-        <div class="filtersRow">
-          <div class="label">Filtros rápidos</div>
-          <div class="filterGroup" role="tablist" aria-label="Filtros de empleados">
-            <button class="filterBtn is-active" type="button" data-filter="all" role="tab" aria-selected="true">Todos</button>
-            <button class="filterBtn" type="button" data-filter="inside" role="tab" aria-selected="false">Dentro</button>
-            <button class="filterBtn" type="button" data-filter="onshift" role="tab" aria-selected="false">En turno</button>
-            <button class="filterBtn" type="button" data-filter="completed" role="tab" aria-selected="false">Completos</button>
-            <button class="filterBtn" type="button" data-filter="noshift" role="tab" aria-selected="false">Sin turno</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="card summaryCard">
-        <div class="cardHead">
-          <div>
-            <div class="cardTitle">Resumen del día</div>
-            <div class="cardSub" id="summarySub">—</div>
-          </div>
-          <div class="summaryHint">Actualización en tiempo real</div>
-        </div>
-        <div class="summaryGrid">
-          <div class="summaryItem accent-primary">
-            <div class="summaryLabel">Empleados</div>
-            <div class="summaryValue" id="summaryTotal">—</div>
-            <div class="summaryMeta">Activos hoy</div>
-          </div>
-          <div class="summaryItem accent-ok">
-            <div class="summaryLabel">Dentro</div>
-            <div class="summaryValue" id="summaryInside">—</div>
-            <div class="summaryMeta">En la oficina</div>
-          </div>
-          <div class="summaryItem accent-warn">
-            <div class="summaryLabel">En turno</div>
-            <div class="summaryValue" id="summaryOnShift">—</div>
-            <div class="summaryMeta">Sin fichar</div>
-          </div>
-          <div class="summaryItem accent-muted">
-            <div class="summaryLabel">Sin turno</div>
-            <div class="summaryValue" id="summaryNoShift">—</div>
-            <div class="summaryMeta">Sin horario</div>
-          </div>
-          <div class="summaryItem accent-info">
-            <div class="summaryLabel">Fichajes completos</div>
-            <div class="summaryValue" id="summaryCompleted">—</div>
-            <div class="summaryMeta">Entrada y salida</div>
-          </div>
-          <div class="summaryItem accent-primary">
-            <div class="summaryLabel">Horas registradas</div>
-            <div class="summaryValue" id="summaryHours">—</div>
-            <div class="summaryMeta">Total del día</div>
-          </div>
-        </div>
-      </section>
-
-<<<<<<< ours
-      <section class="card summaryCard">
-        <div class="cardHead">
-          <div>
-            <div class="cardTitle">Resumen del día</div>
-            <div class="cardSub" id="summarySub">—</div>
-          </div>
-<<<<<<< ours
-        </div>
-        <div class="summaryGrid">
-          <div class="summaryItem">
-            <div class="summaryLabel">Empleados</div>
-            <div class="summaryValue" id="summaryTotal">—</div>
-          </div>
-          <div class="summaryItem">
-            <div class="summaryLabel">Dentro</div>
-            <div class="summaryValue" id="summaryInside">—</div>
-          </div>
-          <div class="summaryItem">
-            <div class="summaryLabel">En turno</div>
-            <div class="summaryValue" id="summaryOnShift">—</div>
-          </div>
-          <div class="summaryItem">
-            <div class="summaryLabel">Sin turno</div>
-            <div class="summaryValue" id="summaryNoShift">—</div>
-          </div>
-          <div class="summaryItem">
-            <div class="summaryLabel">Fichajes completos</div>
-            <div class="summaryValue" id="summaryCompleted">—</div>
-          </div>
-          <div class="summaryItem">
-            <div class="summaryLabel">Horas registradas</div>
-            <div class="summaryValue" id="summaryHours">—</div>
-=======
-          <div class="summaryHint">Actualización en tiempo real</div>
-        </div>
-        <div class="summaryGrid">
-          <div class="summaryItem accent-primary">
-            <div class="summaryLabel">Empleados</div>
-            <div class="summaryValue" id="summaryTotal">—</div>
-            <div class="summaryMeta">Activos hoy</div>
-          </div>
-          <div class="summaryItem accent-ok">
-            <div class="summaryLabel">Dentro</div>
-            <div class="summaryValue" id="summaryInside">—</div>
-            <div class="summaryMeta">En la oficina</div>
-          </div>
-          <div class="summaryItem accent-warn">
-            <div class="summaryLabel">En turno</div>
-            <div class="summaryValue" id="summaryOnShift">—</div>
-            <div class="summaryMeta">Sin fichar</div>
-          </div>
-          <div class="summaryItem accent-muted">
-            <div class="summaryLabel">Sin turno</div>
-            <div class="summaryValue" id="summaryNoShift">—</div>
-            <div class="summaryMeta">Sin horario</div>
-          </div>
-          <div class="summaryItem accent-info">
-            <div class="summaryLabel">Fichajes completos</div>
-            <div class="summaryValue" id="summaryCompleted">—</div>
-            <div class="summaryMeta">Entrada y salida</div>
-          </div>
-          <div class="summaryItem accent-primary">
-            <div class="summaryLabel">Horas registradas</div>
-            <div class="summaryValue" id="summaryHours">—</div>
-            <div class="summaryMeta">Total del día</div>
->>>>>>> theirs
-          </div>
-        </div>
-      </section>
-
-<<<<<<< ours
-=======
->>>>>>> theirs
-=======
-      <section class="card summaryCard">
-        <div class="cardHead">
-          <div>
-            <div class="cardTitle">Resumen del día</div>
-            <div class="cardSub" id="summarySub">—</div>
-          </div>
-          <div class="summaryHint">Actualización en tiempo real</div>
-        </div>
-        <div class="summaryGrid">
-          <div class="summaryItem accent-primary">
-            <div class="summaryLabel">Empleados</div>
-            <div class="summaryValue" id="summaryTotal">—</div>
-            <div class="summaryMeta">Activos hoy</div>
-          </div>
-          <div class="summaryItem accent-ok">
-            <div class="summaryLabel">Dentro</div>
-            <div class="summaryValue" id="summaryInside">—</div>
-            <div class="summaryMeta">En la oficina</div>
-          </div>
-          <div class="summaryItem accent-warn">
-            <div class="summaryLabel">En turno</div>
-            <div class="summaryValue" id="summaryOnShift">—</div>
-            <div class="summaryMeta">Sin fichar</div>
-          </div>
-          <div class="summaryItem accent-muted">
-            <div class="summaryLabel">Sin turno</div>
-            <div class="summaryValue" id="summaryNoShift">—</div>
-            <div class="summaryMeta">Sin horario</div>
-          </div>
-          <div class="summaryItem accent-info">
-            <div class="summaryLabel">Fichajes completos</div>
-            <div class="summaryValue" id="summaryCompleted">—</div>
-            <div class="summaryMeta">Entrada y salida</div>
-          </div>
-          <div class="summaryItem accent-primary">
-            <div class="summaryLabel">Horas registradas</div>
-            <div class="summaryValue" id="summaryHours">—</div>
-            <div class="summaryMeta">Total del día</div>
-          </div>
-        </div>
-        <div class="summaryBars">
-          <div class="summaryBar">
-            <div class="summaryBarTop">
-              <span>Ocupación (dentro)</span>
-              <span id="summaryInsidePct">—</span>
-            </div>
-            <div class="barTrack">
-              <div class="barFill barFill-ok" id="summaryInsideBar"></div>
-            </div>
-          </div>
-          <div class="summaryBar">
-            <div class="summaryBarTop">
-              <span>Fichajes completados</span>
-              <span id="summaryCompletedPct">—</span>
-            </div>
-            <div class="barTrack">
-              <div class="barFill barFill-info" id="summaryCompletedBar"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
->>>>>>> theirs
-      <section class="card listCard">
-        <div class="listHead">
-          <div class="listTitle">
-            <div class="cardTitle">Empleados</div>
-            <div class="cardSub" id="listSub">—</div>
-          </div>
-
-          <div class="listLegend">
-            <span class="chip chip-ok">● Dentro</span>
-            <span class="chip chip-warn">● En turno (sin fichar)</span>
-            <span class="chip chip-muted">● Sin turno</span>
-          </div>
-        </div>
-
-        <div class="tableWrap" role="region" aria-label="Lista de empleados">
-          <div class="tableHead">
-            <div>Empleado</div>
-            <div>Turno de hoy</div>
-            <div>Entrada</div>
-            <div>Salida</div>
-            <div>Horas</div>
-            <div>Acción</div>
-          </div>
-
-          <div class="tableBody" id="employeeList"></div>
-        </div>
-      </section>
-
-      <section class="card logsCard">
-        <div class="cardHead">
-          <div>
-            <div class="cardTitle">Registro</div>
-            <div class="cardSub">Eventos del día seleccionado (append-only)</div>
-          </div>
-          <div class="cardActions">
-            <button class="btn ghost" id="btnClearDay" type="button">Borrar fichajes del día</button>
-          </div>
-        </div>
-
-        <div class="events" id="events"></div>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <div class="footLeft">
-        <span class="pill">PWA</span>
-        <span class="pill">Offline</span>
-        <span class="pill">Smouj013</span>
-      </div>
-      <div class="footRight">
-        <button class="link" id="btnInstall" type="button" hidden>Instalar</button>
-      </div>
-    </footer>
-  </div>
-
-  <!-- Modal Ajustes -->
-  <div class="modalBackdrop" id="settingsBackdrop" hidden></div>
-  <div class="modal" id="settingsModal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-    <div class="modalHead">
-      <div>
-        <div class="modalTitle" id="settingsTitle">Ajustes</div>
-        <div class="modalSub">Empresa, empleados y horarios semanales</div>
-      </div>
-      <button class="btn ghost" id="btnCloseSettings" type="button">✕</button>
-    </div>
-
-    <div class="modalBody">
-      <div class="grid2">
-        <label class="field">
-          <span>Empresa</span>
-          <input class="input" id="inpCompany" placeholder="Ej: Mi Empresa S.L." maxlength="40" />
-        </label>
-
-        <label class="field row">
-          <span>Solicitar PIN para exportar/borrar</span>
-          <input type="checkbox" id="chkPin" />
-        </label>
-      </div>
-
-      <label class="field">
-        <span>PIN (4–10 dígitos)</span>
-        <input class="input" id="inpPin" inputmode="numeric" placeholder="••••" maxlength="10" />
-        <div class="hint">Si activas el PIN, se pedirá para exportar y borrar.</div>
-      </label>
-
-      <div class="divider"></div>
-
-      <div class="cardMini">
-        <div class="miniHead">
-          <div>
-            <div class="miniTitle">Empleados</div>
-            <div class="miniSub">Añade, edita y define su horario semanal.</div>
-          </div>
-        </div>
-
-        <div class="addRow">
-          <input class="input" id="inpNewEmployee" placeholder="Nombre del empleado" maxlength="40" />
-          <input class="input color" id="inpNewColor" type="color" value="#6ee7ff" />
-          <button class="btn primary" id="btnAddEmployee" type="button">Añadir</button>
-        </div>
-
-        <div class="empAdminList" id="empAdminList"></div>
-      </div>
-
-      <div class="smallNote">
-        Nota: esto funciona local (offline). Para uso real de empresa necesitarías servidor y usuarios.
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">⏱️</div>
+      <div class="brand-txt">
+        <div class="brand-title">ClockIn</div>
+        <div class="brand-sub" id="uiDate">—</div>
       </div>
     </div>
 
-    <div class="modalFoot">
-      <button class="btn ghost" id="btnCancelSettings" type="button">Cerrar</button>
-      <button class="btn primary" id="btnSaveSettings" type="button">Guardar</button>
+    <div class="top-actions">
+      <button class="pill pill-update" id="btnUpdate" hidden title="Actualizar">
+        Actualización disponible
+      </button>
+      <button class="iconbtn" id="btnQuickAdd" title="Añadir empleado" aria-label="Añadir empleado">＋</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="navigation" aria-label="Navegación">
+    <button class="tab is-active" data-route="panel">Panel</button>
+    <button class="tab" data-route="resumen">Resumen</button>
+    <button class="tab" data-route="historial">Historial</button>
+    <button class="tab" data-route="ajustes">Ajustes</button>
+  </nav>
+
+  <main class="main">
+    <!-- PANEL -->
+    <section class="view" id="view-panel" data-route="panel">
+      <div class="section-head">
+        <h1>Empleados de hoy</h1>
+        <div class="section-meta">
+          <span class="badge" id="uiCounts">—</span>
+          <span class="badge badge-soft" id="uiOffline" hidden>Offline</span>
+        </div>
+      </div>
+
+      <div class="hint">
+        <span class="dot"></span>
+        <div>
+          Botón <b>Entrada/Salida</b> para fichar. Botón <b>Pausa</b> para inicio/fin de descanso.
+        </div>
+      </div>
+
+      <div class="list" id="employeeList" aria-live="polite"></div>
+    </section>
+
+    <!-- RESUMEN -->
+    <section class="view" id="view-resumen" data-route="resumen" hidden>
+      <div class="section-head">
+        <h1>Resumen diario</h1>
+        <div class="section-meta">
+          <button class="btn" id="btnExportResumen">Exportar resumen CSV</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Hoy</div>
+        <div class="table-wrap">
+          <table class="table" id="summaryTable">
+            <thead>
+              <tr>
+                <th>Empleado</th>
+                <th>Horario</th>
+                <th>Entrada</th>
+                <th>Salida</th>
+                <th>Pausa</th>
+                <th>Trabajado</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORIAL -->
+    <section class="view" id="view-historial" data-route="historial" hidden>
+      <div class="section-head">
+        <h1>Historial</h1>
+        <div class="section-meta">
+          <button class="btn" id="btnExportEventos">Exportar eventos CSV</button>
+        </div>
+      </div>
+
+      <div class="filters card">
+        <div class="grid">
+          <label class="field">
+            <span>Empleado</span>
+            <select id="fEmp"></select>
+          </label>
+
+          <label class="field">
+            <span>Desde</span>
+            <input id="fFrom" type="date" />
+          </label>
+
+          <label class="field">
+            <span>Hasta</span>
+            <input id="fTo" type="date" />
+          </label>
+
+          <div class="field actions">
+            <span>&nbsp;</span>
+            <button class="btn" id="btnApplyFilters">Aplicar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Eventos</div>
+        <div class="table-wrap">
+          <table class="table" id="eventsTable">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Empleado</th>
+                <th>Tipo</th>
+                <th>Nota</th>
+                <th>Ubicación</th>
+                <th>Hash</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- AJUSTES -->
+    <section class="view" id="view-ajustes" data-route="ajustes" hidden>
+      <div class="section-head">
+        <h1>Ajustes</h1>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Seguridad</div>
+        <div class="grid">
+          <label class="field">
+            <span>PIN (opcional)</span>
+            <div class="row">
+              <button class="btn" id="btnSetPin">Configurar/Modificar PIN</button>
+              <button class="btn btn-ghost" id="btnClearPin">Quitar PIN</button>
+            </div>
+            <small class="muted">Protege exportaciones y borrados.</small>
+          </label>
+
+          <label class="field">
+            <span>Geolocalización</span>
+            <div class="row">
+              <label class="toggle">
+                <input type="checkbox" id="tglGeo" />
+                <span class="slider"></span>
+              </label>
+              <span class="muted">Guardar coordenadas aproximadas al fichar (3 decimales).</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Empleados</div>
+        <div class="row row-between">
+          <div class="muted">Gestiona empleados y su horario semanal.</div>
+          <button class="btn" id="btnAddEmp">Añadir empleado</button>
+        </div>
+        <div class="list" id="employeeAdminList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Datos</div>
+        <div class="row">
+          <button class="btn btn-ghost" id="btnBackup">Exportar copia (JSON)</button>
+          <button class="btn btn-ghost" id="btnRestore">Importar copia (JSON)</button>
+          <button class="btn btn-danger" id="btnWipe">Borrar todo</button>
+        </div>
+        <small class="muted">La copia JSON incluye empleados, horarios y eventos.</small>
+      </div>
+
+      <div class="footer">
+        <span class="muted">ClockIn v<span id="uiVer"></span></span>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast-zone" id="toasts" aria-live="polite" aria-relevant="additions"></div>
+
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div class="modal-title" id="modalTitle">—</div>
+        <button class="iconbtn" id="modalClose" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-actions" id="modalActions"></div>
     </div>
   </div>
 
-  <!-- Modal editar horario -->
-  <div class="modalBackdrop" id="editBackdrop" hidden></div>
-  <div class="modal" id="editModal" hidden role="dialog" aria-modal="true" aria-labelledby="editTitle">
-    <div class="modalHead">
-      <div>
-        <div class="modalTitle" id="editTitle">Editar horario</div>
-        <div class="modalSub" id="editSub">—</div>
-      </div>
-      <button class="btn ghost" id="btnCloseEdit" type="button">✕</button>
-    </div>
+  <input type="file" id="filePicker" accept="application/json" hidden />
 
-    <div class="modalBody">
-      <div class="scheduleTools">
-        <button class="btn" id="btnTemplateWeek" type="button">Plantilla 09:00–17:00 (L–V)</button>
-        <button class="btn ghost" id="btnClearSchedule" type="button">Vaciar horario</button>
-      </div>
-
-      <div class="scheduleGrid" id="scheduleGrid"></div>
-
-      <div class="field">
-        <span>Nota interna (opcional)</span>
-        <input class="input" id="inpEmpNote" maxlength="80" placeholder="Ej: Media jornada, turno partido…" />
-      </div>
-    </div>
-
-    <div class="modalFoot">
-      <button class="btn ghost" id="btnCancelEdit" type="button">Cancelar</button>
-      <button class="btn primary" id="btnSaveEdit" type="button">Guardar</button>
-    </div>
-  </div>
-
-  <script defer src="./app.js"></script>
+  <script src="app.js?v=2.0.1"></script>
 </body>
 </html>

@@ -1,658 +1,936 @@
-/*
-  Panel de Fichaje — Smouj013
-  - Vista general (lista de empleados)
-  - Horario semanal por empleado (auto-detecta turno según día)
-  - Botón por empleado: fichar entrada / fichar salida (cierra turno)
-  - Export CSV día / semana
-  - PWA offline (SW)
-*/
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "smouj013_fichaje_v2";
+  const APP_VERSION = String(window.APP_VERSION || "2.0.0");
+  const STORAGE_KEY = "clockin_v2";
 
-  const $ = (id) => document.getElementById(id);
+  const DAYS = [
+    { i: 1, key: "mon", label: "Lunes" },
+    { i: 2, key: "tue", label: "Martes" },
+    { i: 3, key: "wed", label: "Miércoles" },
+    { i: 4, key: "thu", label: "Jueves" },
+    { i: 5, key: "fri", label: "Viernes" },
+    { i: 6, key: "sat", label: "Sábado" },
+    { i: 0, key: "sun", label: "Domingo" },
+  ];
 
-  const el = {
-    companyName: $("companyName"),
-    subTitle: $("subTitle"),
-
-    datePicker: $("datePicker"),
-    btnPrevDay: $("btnPrevDay"),
-    btnNextDay: $("btnNextDay"),
-    btnToday: $("btnToday"),
-    dateHint: $("dateHint"),
-
-    searchInput: $("searchInput"),
-    employeeList: $("employeeList"),
-    listSub: $("listSub"),
-    filterButtons: Array.from(document.querySelectorAll(".filterBtn")),
-
-    summarySub: $("summarySub"),
-    summaryTotal: $("summaryTotal"),
-    summaryInside: $("summaryInside"),
-    summaryOnShift: $("summaryOnShift"),
-    summaryNoShift: $("summaryNoShift"),
-    summaryCompleted: $("summaryCompleted"),
-    summaryHours: $("summaryHours"),
-
-    summarySub: $("summarySub"),
-    summaryTotal: $("summaryTotal"),
-    summaryInside: $("summaryInside"),
-    summaryOnShift: $("summaryOnShift"),
-    summaryNoShift: $("summaryNoShift"),
-    summaryCompleted: $("summaryCompleted"),
-    summaryHours: $("summaryHours"),
-    summaryInsidePct: $("summaryInsidePct"),
-    summaryCompletedPct: $("summaryCompletedPct"),
-    summaryInsideBar: $("summaryInsideBar"),
-    summaryCompletedBar: $("summaryCompletedBar"),
-
-    events: $("events"),
-
-    btnExportDay: $("btnExportDay"),
-    btnExportWeek: $("btnExportWeek"),
-    btnClearDay: $("btnClearDay"),
-
-    btnSettings: $("btnSettings"),
-    settingsBackdrop: $("settingsBackdrop"),
-    settingsModal: $("settingsModal"),
-    btnCloseSettings: $("btnCloseSettings"),
-    btnCancelSettings: $("btnCancelSettings"),
-    btnSaveSettings: $("btnSaveSettings"),
-    inpCompany: $("inpCompany"),
-    chkPin: $("chkPin"),
-    inpPin: $("inpPin"),
-
-    inpNewEmployee: $("inpNewEmployee"),
-    inpNewColor: $("inpNewColor"),
-    btnAddEmployee: $("btnAddEmployee"),
-    empAdminList: $("empAdminList"),
-
-    editBackdrop: $("editBackdrop"),
-    editModal: $("editModal"),
-    editTitle: $("editTitle"),
-    editSub: $("editSub"),
-    btnCloseEdit: $("btnCloseEdit"),
-    btnCancelEdit: $("btnCancelEdit"),
-    btnSaveEdit: $("btnSaveEdit"),
-    btnTemplateWeek: $("btnTemplateWeek"),
-    btnClearSchedule: $("btnClearSchedule"),
-    scheduleGrid: $("scheduleGrid"),
-    inpEmpNote: $("inpEmpNote"),
-
-    btnInstall: $("btnInstall"),
-    liveClock: $("liveClock"),
-  };
-
-  // Helpers
+  // ────────────────────────────────────────────────────────────────────────────
+  // DOM helpers
+  // ────────────────────────────────────────────────────────────────────────────
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   const pad2 = (n) => String(n).padStart(2, "0");
-  const nowMs = () => Date.now();
 
-  function makeId() {
-    return "id_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
+  function dateKeyLocal(d) {
+    const y = d.getFullYear();
+    const m = pad2(d.getMonth() + 1);
+    const da = pad2(d.getDate());
+    return `${y}-${m}-${da}`;
   }
 
-  function toDateInputValue(d) {
-    const year = d.getFullYear();
-    const month = pad2(d.getMonth() + 1);
-    const day = pad2(d.getDate());
-    return `${year}-${month}-${day}`;
+  function fmtDateHuman(d) {
+    return d.toLocaleDateString("es-ES", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   }
 
-  function parseDateInputValue(v) {
-    // v = YYYY-MM-DD, interpret as local date
-    const [y, m, d] = (v || "").split("-").map(x => parseInt(x, 10));
-    if (!y || !m || !d) return new Date();
-    return new Date(y, m - 1, d, 0, 0, 0, 0);
+  function fmtTime(ts) {
+    if (!Number.isFinite(ts)) return "—";
+    return new Date(ts).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
   }
 
-  function fmtTime(ms) {
-    if (!ms) return "—";
-    const d = new Date(ms);
-    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  function fmtHMFromMinutes(min) {
+    if (!Number.isFinite(min)) return "—";
+    const h = Math.floor(min / 60);
+    const m = Math.round(min % 60);
+    return `${h}h ${pad2(m)}m`;
   }
 
-  function fmtFull(ms) {
-    const d = new Date(ms);
-    return `${toDateInputValue(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  function minutesFromMs(ms) {
+    return Math.max(0, Math.round(ms / 60000));
   }
 
-  function fmtDuration(ms) {
-    if (!ms || ms <= 0) return "—";
-    const totalMinutes = Math.floor(ms / 60000);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return `${hours}h ${pad2(minutes)}m`;
+  function uid(prefix = "id") {
+    return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
   }
 
-<<<<<<< ours
-=======
-  function fmtClock(dateObj) {
-    return new Intl.DateTimeFormat("es-ES", {
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit"
-    }).format(dateObj);
-  }
-
->>>>>>> theirs
-  function weekdayIndex(dateObj) {
-    // JS: 0=Dom..6=Sáb
-    return dateObj.getDay();
-  }
-
-  const DAY_NAMES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-
-  function clampDay(dateObj, deltaDays) {
-    const d = new Date(dateObj);
-    d.setDate(d.getDate() + deltaDays);
-    return d;
-  }
-
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
+  // ────────────────────────────────────────────────────────────────────────────
   // State
+  // ────────────────────────────────────────────────────────────────────────────
+  function defaultSchedule() {
+    // L-V 09:00-17:00 con 30m de pausa. S-D off.
+    const sch = {};
+    for (const d of DAYS) {
+      if (d.key === "sat" || d.key === "sun") {
+        sch[d.key] = { enabled: false, start: "09:00", end: "17:00", breakMin: 30 };
+      } else {
+        sch[d.key] = { enabled: true, start: "09:00", end: "17:00", breakMin: 30 };
+      }
+    }
+    return sch;
+  }
+
   function defaultState() {
     return {
+      v: 2,
       settings: {
-        company: "Panel de Fichaje",
-        requirePin: false,
-        pinSalt: "",
-        pinHash: "",
+        pinSaltB64: "",
+        pinHashB64: "",
+        geoEnabled: false,
       },
       employees: [
-        // demo suave (puedes borrar en ajustes)
-        createEmployee("Ana", "#6ee7ff"),
-        createEmployee("Carlos", "#ffd166"),
-        createEmployee("Marta", "#70ffb4"),
+        { id: "emp_ana", name: "Ana", color: "#7c5cff", active: true, schedule: defaultSchedule() },
+        { id: "emp_dani", name: "Dani", color: "#22d3ee", active: true, schedule: defaultSchedule() },
       ],
-      // records por fecha y empleado: { "YYYY-MM-DD": { [empId]: { inTs, outTs } } }
-      records: {},
-      // eventos append-only
-      events: []
+      events: [],
     };
-  }
-
-  function createEmployee(name, color) {
-    const emp = {
-      id: makeId(),
-      name: String(name || "Empleado").slice(0, 40),
-      color: color || "#6ee7ff",
-      note: "",
-      // weekly schedule: keys 0..6 (Dom..Sáb) => { start:"09:00", end:"17:00" } o null
-      weekly: {
-        0: null,
-        1: { start: "09:00", end: "17:00" },
-        2: { start: "09:00", end: "17:00" },
-        3: { start: "09:00", end: "17:00" },
-        4: { start: "09:00", end: "17:00" },
-        5: { start: "09:00", end: "17:00" },
-        6: null
-      }
-    };
-    return emp;
   }
 
   function loadState() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return defaultState();
-      const parsed = JSON.parse(raw);
+      const s = JSON.parse(raw);
 
-      const st = defaultState();
-      st.settings = Object.assign(st.settings, parsed.settings || {});
-      st.employees = Array.isArray(parsed.employees) ? parsed.employees : st.employees;
-      st.records = (parsed.records && typeof parsed.records === "object") ? parsed.records : {};
-      st.events = Array.isArray(parsed.events) ? parsed.events : [];
-      return st;
+      if (!s || typeof s !== "object") return defaultState();
+      if (!Array.isArray(s.employees)) s.employees = [];
+      if (!Array.isArray(s.events)) s.events = [];
+      if (!s.settings || typeof s.settings !== "object") s.settings = {};
+
+      // Normaliza
+      s.v = 2;
+      s.settings.geoEnabled = !!s.settings.geoEnabled;
+      s.settings.pinSaltB64 = String(s.settings.pinSaltB64 || "");
+      s.settings.pinHashB64 = String(s.settings.pinHashB64 || "");
+
+      // Asegura schedule
+      for (const e of s.employees) {
+        if (!e.schedule || typeof e.schedule !== "object") e.schedule = defaultSchedule();
+        for (const d of DAYS) {
+          if (!e.schedule[d.key]) e.schedule[d.key] = { enabled: d.key !== "sat" && d.key !== "sun", start: "09:00", end: "17:00", breakMin: 30 };
+          e.schedule[d.key].enabled = !!e.schedule[d.key].enabled;
+          e.schedule[d.key].start = String(e.schedule[d.key].start || "09:00");
+          e.schedule[d.key].end = String(e.schedule[d.key].end || "17:00");
+          e.schedule[d.key].breakMin = clampInt(e.schedule[d.key].breakMin, 0, 240);
+        }
+        e.active = (e.active !== false);
+        e.color = String(e.color || "#7c5cff");
+        e.name = String(e.name || "Empleado");
+        e.id = String(e.id || uid("emp"));
+      }
+
+      return s;
     } catch {
       return defaultState();
     }
   }
 
-  const state = loadState();
-
   function saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {}
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
-  function scheduleRender() {
-    if (scheduleRender.pending) return;
-    scheduleRender.pending = true;
-    requestAnimationFrame(() => {
-      scheduleRender.pending = false;
-      renderAll();
-    });
+  function clampInt(v, a, b) {
+    const n = Number.isFinite(+v) ? (+v | 0) : a;
+    return Math.max(a, Math.min(b, n));
   }
 
-  // PIN
-  function randomSalt() {
-    const arr = new Uint8Array(16);
-    crypto.getRandomValues(arr);
-    return [...arr].map(b => b.toString(16).padStart(2, "0")).join("");
-  }
+  let state = loadState();
 
-  function hexToBytes(hex) {
-    const clean = (hex || "").trim();
-    const out = new Uint8Array(clean.length / 2);
-    for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
+  // ────────────────────────────────────────────────────────────────────────────
+  // Crypto: SHA-256 + PBKDF2 (PIN)
+  // ────────────────────────────────────────────────────────────────────────────
+  function bytesToB64(bytes) {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64ToBytes(b64) {
+    const bin = atob(String(b64 || ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
   }
 
-  async function pbkdf2Hex(pin, saltHex) {
-    if (!crypto?.subtle) return "";
-    const salt = hexToBytes(saltHex);
-    const enc = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
-    const bits = await crypto.subtle.deriveBits({
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt,
-      iterations: 120000
-    }, keyMaterial, 256);
-    return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+  function fnv1aHex(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return ("00000000" + h.toString(16)).slice(-8).padStart(64, "0");
   }
 
-  async function ensurePinAllowed() {
-    if (!state.settings.requirePin) return true;
-    const pin = prompt("Introduce el PIN para continuar:");
-    if (pin == null) return false;
-    const p = pin.trim();
-    if (p.length < 4) return false;
-
-    const salt = state.settings.pinSalt || "";
-    const target = state.settings.pinHash || "";
-    if (!salt || !target) return false;
-
-    const hash = await pbkdf2Hex(p, salt);
-    return hash && hash === target;
+  async function sha256Hex(str) {
+    try {
+      if (!crypto?.subtle) return fnv1aHex(str);
+      const data = new TextEncoder().encode(str);
+      const digest = await crypto.subtle.digest("SHA-256", data);
+      const bytes = new Uint8Array(digest);
+      let hex = "";
+      for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+      return hex;
+    } catch {
+      return fnv1aHex(str);
+    }
   }
 
-  // Current view date
-  let viewDate = parseDateInputValue(el.datePicker?.value || toDateInputValue(new Date()));
-  let searchQuery = "";
-  let activeFilter = "all";
-  let searchTimer = null;
+  async function pbkdf2HashB64(pin, saltBytes, iterations = 150000) {
+    if (!crypto?.subtle) throw new Error("WebCrypto no disponible");
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(pin),
+      "PBKDF2",
+      false,
+      ["deriveBits"]
+    );
 
-  function getDateKey(d) {
-    return toDateInputValue(d);
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
+      keyMaterial,
+      256
+    );
+
+    return bytesToB64(new Uint8Array(bits));
   }
 
-  function ensureDayRecord(dateKey) {
-    if (!state.records[dateKey]) state.records[dateKey] = {};
-    return state.records[dateKey];
+  // ────────────────────────────────────────────────────────────────────────────
+  // Modal + Toast
+  // ────────────────────────────────────────────────────────────────────────────
+  const modalBackdrop = $("#modalBackdrop");
+  const modalTitle = $("#modalTitle");
+  const modalBody = $("#modalBody");
+  const modalActions = $("#modalActions");
+  const modalClose = $("#modalClose");
+
+  let modalResolve = null;
+
+  function closeModal(result = null) {
+    if (!modalBackdrop) return;
+    modalBackdrop.hidden = true;
+    modalBody.innerHTML = "";
+    modalActions.innerHTML = "";
+    const r = modalResolve;
+    modalResolve = null;
+    if (typeof r === "function") r(result);
   }
 
-  function getEmpRecord(dateKey, empId) {
-    const day = ensureDayRecord(dateKey);
-    if (!day[empId]) day[empId] = { inTs: 0, outTs: 0 };
-    return day[empId];
-  }
+  function openModal({ title, bodyHtml, actions }) {
+    modalTitle.textContent = title || "—";
+    modalBody.innerHTML = bodyHtml || "";
+    modalActions.innerHTML = "";
 
-  // Schedule
-  function getShiftForEmployeeOnDate(emp, dateObj) {
-    const idx = weekdayIndex(dateObj); // 0..6
-    const s = emp.weekly?.[idx] || null;
-    if (!s || !s.start || !s.end) return null;
-    return { start: s.start, end: s.end };
-  }
-
-  function isWithinShiftNow(shift, dateObjNow) {
-    if (!shift) return false;
-
-    const d = new Date(dateObjNow);
-    const [sh, sm] = shift.start.split(":").map(n => parseInt(n, 10));
-    const [eh, em] = shift.end.split(":").map(n => parseInt(n, 10));
-
-    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), sh || 0, sm || 0, 0, 0).getTime();
-    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), eh || 0, em || 0, 0, 0).getTime();
-
-    const t = d.getTime();
-    // Si el turno acaba “antes” del inicio, se entiende que cruza medianoche (no lo implementamos a fondo, pero lo soporta mínimo)
-    if (end < start) {
-      // turno nocturno: [start..fin día] U [inicio día..end]
-      const endPlus = end + 24 * 60 * 60 * 1000;
-      const t2 = t < start ? t + 24 * 60 * 60 * 1000 : t;
-      return (t2 >= start && t2 <= endPlus);
+    for (const a of (actions || [])) {
+      const btn = document.createElement("button");
+      btn.className = a.className || "btn";
+      btn.textContent = a.label || "OK";
+      btn.addEventListener("click", async () => {
+        if (a.onClick) {
+          const res = await a.onClick();
+          if (res !== "__KEEP_OPEN__") closeModal(res);
+        } else {
+          closeModal(true);
+        }
+      });
+      modalActions.appendChild(btn);
     }
 
-    return (t >= start && t <= end);
+    modalBackdrop.hidden = false;
+
+    return new Promise((resolve) => {
+      modalResolve = resolve;
+    });
   }
 
-  // Events
-  function addEvent(type, emp, dateKey, payload = {}) {
-    state.events.push({
-      id: makeId(),
-      ts: nowMs(),
-      type,
-      empId: emp?.id || "",
-      empName: emp?.name || "",
-      dateKey,
-      payload
+  modalClose?.addEventListener("click", () => closeModal(null));
+  modalBackdrop?.addEventListener("click", (e) => {
+    if (e.target === modalBackdrop) closeModal(null);
+  });
+
+  const toastZone = $("#toasts");
+  function toast(kind, msg, sub = "") {
+    const t = document.createElement("div");
+    t.className = "toast";
+    const icon = kind === "ok" ? "✅" : kind === "warn" ? "⚠️" : kind === "bad" ? "⛔" : "ℹ️";
+    t.innerHTML = `
+      <div class="ticon" aria-hidden="true">${icon}</div>
+      <div>
+        <div class="tmsg">${esc(msg)}</div>
+        ${sub ? `<div class="tsub">${esc(sub)}</div>` : ""}
+      </div>
+    `;
+    toastZone.appendChild(t);
+    setTimeout(() => {
+      t.style.opacity = "0";
+      t.style.transform = "translateY(6px)";
+      t.style.transition = "opacity .18s ease, transform .18s ease";
+      setTimeout(() => t.remove(), 220);
+    }, 3400);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Geolocation (optional)
+  // ────────────────────────────────────────────────────────────────────────────
+  async function getRoundedLocation() {
+    if (!state.settings.geoEnabled) return null;
+    if (!navigator.geolocation) return null;
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = +pos.coords.latitude.toFixed(3);
+          const lng = +pos.coords.longitude.toFixed(3);
+          resolve({ lat, lng });
+        },
+        () => resolve(null),
+        { enableHighAccuracy: false, timeout: 6000, maximumAge: 120000 }
+      );
     });
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Events + day stats
+  // ────────────────────────────────────────────────────────────────────────────
+  function getEmpById(id) {
+    return state.employees.find(e => e.id === id) || null;
+  }
+
+  function dayKeyFromTS(ts) {
+    return dateKeyLocal(new Date(ts));
+  }
+
+  function getEventsForEmpOnDate(empId, dKey) {
+    return state.events
+      .filter(ev => ev.empId === empId && dayKeyFromTS(ev.ts) === dKey)
+      .sort((a,b) => a.ts - b.ts);
+  }
+
+  function getLastEventForEmp(empId) {
+    const evs = state.events.filter(e => e.empId === empId).sort((a,b) => a.ts - b.ts);
+    return evs.length ? evs[evs.length - 1] : null;
+  }
+
+  function getLastHashForEmp(empId) {
+    const last = getLastEventForEmp(empId);
+    return last?.hash || "";
+  }
+
+  function typeLabel(t) {
+    return t === "IN" ? "Entrada"
+      : t === "OUT" ? "Salida"
+      : t === "BREAK_START" ? "Pausa (inicio)"
+      : t === "BREAK_END" ? "Pausa (fin)"
+      : t;
+  }
+
+  function calcDay(empId, dKey, nowTs = Date.now()) {
+    const evs = getEventsForEmpOnDate(empId, dKey);
+
+    let inTs = null;
+    let outTs = null;
+
+    let mode = "out"; // out | in | break
+    let cursor = null;
+
+    let workMs = 0;
+    let breakMs = 0;
+
+    for (const ev of evs) {
+      if (ev.type === "IN") {
+        if (mode === "out") {
+          mode = "in";
+          cursor = ev.ts;
+          if (inTs == null) inTs = ev.ts;
+        }
+      } else if (ev.type === "BREAK_START") {
+        if (mode === "in" && cursor != null) {
+          workMs += Math.max(0, ev.ts - cursor);
+          mode = "break";
+          cursor = ev.ts;
+        }
+      } else if (ev.type === "BREAK_END") {
+        if (mode === "break" && cursor != null) {
+          breakMs += Math.max(0, ev.ts - cursor);
+          mode = "in";
+          cursor = ev.ts;
+        }
+      } else if (ev.type === "OUT") {
+        if (mode === "in" && cursor != null) {
+          workMs += Math.max(0, ev.ts - cursor);
+        } else if (mode === "break" && cursor != null) {
+          breakMs += Math.max(0, ev.ts - cursor);
+        }
+        mode = "out";
+        cursor = null;
+        outTs = ev.ts;
+      }
+    }
+
+    // hasta ahora
+    if (mode === "in" && cursor != null) workMs += Math.max(0, nowTs - cursor);
+    if (mode === "break" && cursor != null) breakMs += Math.max(0, nowTs - cursor);
+
+    const status =
+      mode === "in" ? "Trabajando" :
+      mode === "break" ? "En pausa" :
+      (inTs ? "Fuera" : "Sin fichar");
+
+    return {
+      evs,
+      inTs,
+      outTs,
+      workMs,
+      breakMs,
+      mode,
+      status,
+    };
+  }
+
+  async function addEvent(empId, type, note = "") {
+    const ts = Date.now();
+    const loc = await getRoundedLocation();
+    const prevHash = getLastHashForEmp(empId);
+
+    const payload = [
+      prevHash,
+      empId,
+      type,
+      String(ts),
+      String(note || ""),
+      loc ? String(loc.lat) : "",
+      loc ? String(loc.lng) : "",
+    ].join("|");
+
+    const hash = await sha256Hex(payload);
+
+    state.events.push({
+      id: uid("evt"),
+      empId,
+      type,
+      ts,
+      note: String(note || ""),
+      lat: loc?.lat ?? null,
+      lng: loc?.lng ?? null,
+      prevHash,
+      hash,
+    });
+
     saveState();
   }
 
-  function getEventsForDay(dateKey) {
-    return state.events.filter(e => e.dateKey === dateKey);
+  // ────────────────────────────────────────────────────────────────────────────
+  // PIN (optional)
+  // ────────────────────────────────────────────────────────────────────────────
+  function hasPin() {
+    return !!(state.settings.pinSaltB64 && state.settings.pinHashB64);
   }
 
-  // UI: render list
-  function renderHeader() {
-    el.companyName.textContent = state.settings.company || "Panel de Fichaje";
-    el.subTitle.textContent = "Vista general";
+  async function promptPin(title = "Introduce el PIN") {
+    const res = await openModal({
+      title,
+      bodyHtml: `
+        <label class="field">
+          <span>PIN</span>
+          <input id="pinInput" type="password" inputmode="numeric" autocomplete="current-password" placeholder="••••" />
+          <small class="muted">Se usa para proteger exportaciones y borrados.</small>
+        </label>
+      `,
+      actions: [
+        { label: "Cancelar", className: "btn btn-ghost", onClick: () => null },
+        {
+          label: "Aceptar",
+          className: "btn btn-primary",
+          onClick: () => $("#pinInput").value.trim()
+        }
+      ]
+    });
+    return (res && String(res).trim()) ? String(res).trim() : null;
   }
 
-  function renderDateControls() {
-    const key = getDateKey(viewDate);
-    el.datePicker.value = key;
-
-    const idx = weekdayIndex(viewDate);
-    el.dateHint.textContent = `Día: ${DAY_NAMES[idx]} · ${key}`;
+  async function verifyPin(pin) {
+    try {
+      const salt = b64ToBytes(state.settings.pinSaltB64);
+      const hash = await pbkdf2HashB64(pin, salt);
+      return hash === state.settings.pinHashB64;
+    } catch {
+      return false;
+    }
   }
 
-  function renderList() {
-    const key = getDateKey(viewDate);
-    const dayRec = ensureDayRecord(key);
+  async function requirePinIfSet() {
+    if (!hasPin()) return true;
+    const pin = await promptPin("PIN requerido");
+    if (!pin) return false;
+    const ok = await verifyPin(pin);
+    if (!ok) toast("bad", "PIN incorrecto");
+    return ok;
+  }
 
-    const now = new Date();
-    const isToday = (getDateKey(now) === key);
-    const filterLabelMap = {
-      all: "Todos",
-      inside: "Dentro",
-      onshift: "En turno",
-      completed: "Completos",
-      noshift: "Sin turno"
-    };
+  async function setPinFlow() {
+    const p1 = await promptPin("Configurar PIN");
+    if (!p1) return;
+    const p2 = await promptPin("Repite el PIN");
+    if (!p2) return;
+    if (p1 !== p2) {
+      toast("bad", "Los PIN no coinciden");
+      return;
+    }
+    try {
+      const salt = new Uint8Array(16);
+      crypto.getRandomValues(salt);
+      const hash = await pbkdf2HashB64(p1, salt);
+      state.settings.pinSaltB64 = bytesToB64(salt);
+      state.settings.pinHashB64 = hash;
+      saveState();
+      toast("ok", "PIN configurado");
+      renderAll();
+    } catch {
+      toast("bad", "No se pudo configurar el PIN (WebCrypto)");
+    }
+  }
 
-    const filtered = state.employees
-      .filter(e => e && e.name)
-      .filter(e => e.name.toLowerCase().includes(searchQuery))
-      .filter(emp => {
-        if (activeFilter === "all") return true;
-        const rec = getEmpRecord(key, emp.id);
-        const shift = getShiftForEmployeeOnDate(emp, viewDate);
-        const isInside = !!rec.inTs && !rec.outTs;
-        const isCompleted = !!rec.inTs && !!rec.outTs;
-        const isNoShift = !shift;
-        const isOnShift = shift && isToday && !rec.inTs && !rec.outTs && isWithinShiftNow(shift, now);
+  async function clearPinFlow() {
+    const ok = await openModal({
+      title: "Quitar PIN",
+      bodyHtml: `<div class="muted">¿Seguro que quieres quitar el PIN?</div>`,
+      actions: [
+        { label: "Cancelar", className: "btn btn-ghost", onClick: () => null },
+        { label: "Quitar", className: "btn btn-danger", onClick: () => true },
+      ]
+    });
+    if (!ok) return;
 
-        if (activeFilter === "inside") return isInside;
-        if (activeFilter === "completed") return isCompleted;
-        if (activeFilter === "noshift") return isNoShift;
-        if (activeFilter === "onshift") return isOnShift;
-        return true;
+    state.settings.pinSaltB64 = "";
+    state.settings.pinHashB64 = "";
+    saveState();
+    toast("ok", "PIN eliminado");
+    renderAll();
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // UI: routing
+  // ────────────────────────────────────────────────────────────────────────────
+  const uiDateConsider = $("#uiDate");
+  const uiVer = $("#uiVer");
+  const uiCounts = $("#uiCounts");
+  const uiOffline = $("#uiOffline");
+
+  const employeeList = $("#employeeList");
+  const employeeAdminList = $("#employeeAdminList");
+
+  const summaryTableBody = $("#summaryTable tbody");
+  const eventsTableBody = $("#eventsTable tbody");
+
+  const btnQuickAdd = $("#btnQuickAdd");
+
+  function setRoute(route) {
+    $$(".tab").forEach(b => b.classList.toggle("is-active", b.dataset.route === route));
+    $$(".view").forEach(v => v.hidden = v.dataset.route !== route);
+    history.replaceState(null, "", `#${route}`);
+  }
+
+  function getRoute() {
+    const r = location.hash.replace("#", "").trim();
+    return r || "panel";
+  }
+
+  $$(".tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      setRoute(btn.dataset.route);
+      renderAll();
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Render: Panel
+  // ────────────────────────────────────────────────────────────────────────────
+  function scheduleForToday(emp) {
+    const day = DAYS.find(d => d.i === new Date().getDay());
+    const slot = emp.schedule?.[day.key];
+    return slot || { enabled: false, start: "09:00", end: "17:00", breakMin: 30 };
+  }
+
+  function renderPanel() {
+    const todayKey = dateKeyLocal(new Date());
+    const activeEmps = state.employees.filter(e => e.active);
+
+    // Orden: primero los que tienen turno hoy, luego el resto
+    const sorted = [...activeEmps].sort((a,b) => {
+      const as = scheduleForToday(a).enabled ? 0 : 1;
+      const bs = scheduleForToday(b).enabled ? 0 : 1;
+      if (as !== bs) return as - bs;
+      return a.name.localeCompare(b.name, "es");
+    });
+
+    const scheduledCount = sorted.filter(e => scheduleForToday(e).enabled).length;
+    uiCounts.textContent = `${scheduledCount}/${sorted.length} en turno hoy`;
+
+    employeeList.innerHTML = "";
+
+    for (const emp of sorted) {
+      const slot = scheduleForToday(emp);
+      const day = calcDay(emp.id, todayKey);
+
+      const horarioTxt = slot.enabled ? `${slot.start}–${slot.end} · pausa ${slot.breakMin}m` : `Fuera de turno`;
+
+      const entradaTxt = day.inTs ? fmtTime(day.inTs) : "—";
+      const salidaTxt = day.outTs ? fmtTime(day.outTs) : "—";
+      const pausaTxt = fmtHMFromMinutes(minutesFromMs(day.breakMs));
+      const trabajadoTxt = fmtHMFromMinutes(minutesFromMs(day.workMs));
+
+      const statusPill =
+        day.mode === "in" ? `<span class="pill ok">● Trabajando</span>` :
+        day.mode === "break" ? `<span class="pill warn">● Pausa</span>` :
+        (day.inTs ? `<span class="pill off">● Fuera</span>` : `<span class="pill off">● Sin fichar</span>`);
+
+      const btnMainLabel =
+        day.mode === "out" ? "Fichar entrada" : "Fichar salida";
+      const btnMainClass =
+        day.mode === "out" ? "btn btn-primary" : "btn btn-primary";
+
+      const btnBreakLabel =
+        day.mode === "break" ? "Volver" : "Pausa";
+      const breakDisabled = (day.mode === "out");
+
+      const row = document.createElement("div");
+      row.className = "emp";
+      row.innerHTML = `
+        <div class="emp-left">
+          <div class="avatar" style="background: linear-gradient(135deg, ${esc(emp.color)}22, rgba(255,255,255,.06)); border-color: ${esc(emp.color)}55">${esc(emp.name.slice(0,1).toUpperCase())}</div>
+          <div class="emp-meta">
+            <div class="emp-name">${esc(emp.name)}</div>
+            <div class="emp-sub">
+              ${statusPill}
+              <span class="pill">${esc(horarioTxt)}</span>
+              <span class="pill">Entrada: <b>${esc(entradaTxt)}</b></span>
+              <span class="pill">Salida: <b>${esc(salidaTxt)}</b></span>
+              <span class="pill">Pausa: <b>${esc(pausaTxt)}</b></span>
+              <span class="pill">Trabajado: <b>${esc(trabajadoTxt)}</b></span>
+            </div>
+          </div>
+        </div>
+        <div class="emp-right">
+          <button class="${btnMainClass}" data-act="main" data-id="${esc(emp.id)}">${esc(btnMainLabel)}</button>
+          <button class="btn btn-ghost" data-act="break" data-id="${esc(emp.id)}" ${breakDisabled ? "disabled":""}>${esc(btnBreakLabel)}</button>
+          <button class="iconbtn" data-act="edit" data-id="${esc(emp.id)}" title="Editar" aria-label="Editar">⚙️</button>
+        </div>
+      `;
+
+      row.addEventListener("click", async (e) => {
+        const t = e.target;
+        if (!(t instanceof HTMLElement)) return;
+        const act = t.getAttribute("data-act");
+        const id = t.getAttribute("data-id");
+        if (!act || !id) return;
+
+        if (act === "edit") {
+          await editEmployeeFlow(id);
+          return;
+        }
+
+        // Nota opcional
+        const note = await openModal({
+          title: "Nota (opcional)",
+          bodyHtml: `
+            <label class="field">
+              <span>Nota</span>
+              <textarea id="noteInput" placeholder="Ej: médico, reunión, incidencias..."></textarea>
+              <small class="muted">Puedes dejarlo vacío.</small>
+            </label>
+          `,
+          actions: [
+            { label: "Omitir", className: "btn btn-ghost", onClick: () => "" },
+            { label: "Guardar", className: "btn btn-primary", onClick: () => $("#noteInput").value.trim() },
+          ],
+        });
+
+        const n = (note == null) ? "" : String(note);
+
+        if (act === "main") {
+          const today = calcDay(id, todayKey);
+          if (today.mode === "out") {
+            await addEvent(id, "IN", n);
+            toast("ok", `${getEmpById(id)?.name || "Empleado"} · Entrada registrada`);
+          } else {
+            await addEvent(id, "OUT", n);
+            toast("ok", `${getEmpById(id)?.name || "Empleado"} · Salida registrada`);
+          }
+          renderAll();
+        }
+
+        if (act === "break") {
+          const today = calcDay(id, todayKey);
+          if (today.mode === "in") {
+            await addEvent(id, "BREAK_START", n);
+            toast("warn", `${getEmpById(id)?.name || "Empleado"} · Pausa iniciada`);
+          } else if (today.mode === "break") {
+            await addEvent(id, "BREAK_END", n);
+            toast("ok", `${getEmpById(id)?.name || "Empleado"} · Pausa finalizada`);
+          }
+          renderAll();
+        }
       });
 
-    const filterLabel = filterLabelMap[activeFilter] || "Todos";
-    el.listSub.textContent = `${filtered.length} empleado(s) · Filtro: ${filterLabel} · Fecha: ${key}`;
-
-    if (!filtered.length) {
-      el.employeeList.innerHTML = `
-        <div class="row">
-          <div class="empCell">
-            <div class="avatar">?</div>
-            <div>
-              <div class="empName">Sin resultados</div>
-              <div class="empMeta">Prueba a borrar el filtro.</div>
-            </div>
-          </div>
-          <div class="shiftCell"><div class="shiftMain">—</div></div>
-          <div class="timeCell muted">—</div>
-          <div class="timeCell muted">—</div>
-          <div class="timeCell muted">—</div>
-          <div class="actionCell"></div>
-        </div>
-      `;
-      return;
+      employeeList.appendChild(row);
     }
-
-    el.employeeList.innerHTML = filtered.map(emp => {
-      const rec = getEmpRecord(key, emp.id);
-      const shift = getShiftForEmployeeOnDate(emp, viewDate);
-
-      const inTxt = rec.inTs ? fmtTime(rec.inTs) : "—";
-      const outTxt = rec.outTs ? fmtTime(rec.outTs) : "—";
-      const durationMs = rec.inTs && rec.outTs
-        ? Math.max(0, rec.outTs - rec.inTs)
-        : (rec.inTs && isToday ? Math.max(0, now.getTime() - rec.inTs) : 0);
-      const durationTxt = rec.inTs
-        ? fmtDuration(durationMs)
-        : "—";
-
-      const inside = !!rec.inTs && !rec.outTs;
-      const shiftTxt = shift ? `${shift.start}–${shift.end}` : "Sin turno";
-
-      const showTurnoBadge = shift && isToday && isWithinShiftNow(shift, now) && !inside && !rec.outTs;
-      const badge = inside
-        ? `<span class="chip chip-ok">● Dentro</span>`
-        : showTurnoBadge
-          ? `<span class="chip chip-warn">● En turno</span>`
-          : shift
-            ? ``
-            : `<span class="chip chip-muted">● Sin turno</span>`;
-
-      const initial = emp.name.trim().slice(0, 1).toUpperCase();
-      const btnLabel = inside ? "Cerrar" : "Fichar";
-      const btnClass = inside ? "out" : "in";
-
-      return `
-        <div class="row" data-emp="${emp.id}">
-          <div class="empCell">
-            <div class="avatar" style="background:${escapeHtml(emp.color)}22;border-color:${escapeHtml(emp.color)}33;">
-              ${escapeHtml(initial)}
-            </div>
-            <div style="min-width:0;">
-              <div class="empName">${escapeHtml(emp.name)}</div>
-              <div class="empMeta">${escapeHtml(emp.note || "")}</div>
-            </div>
-          </div>
-
-          <div class="shiftCell">
-            <div class="shiftMain">${escapeHtml(shiftTxt)}</div>
-            <div class="badges">${badge}</div>
-          </div>
-
-          <div class="timeCell ${rec.inTs ? "" : "muted"}">${escapeHtml(inTxt)}</div>
-          <div class="timeCell ${rec.outTs ? "" : "muted"}">${escapeHtml(outTxt)}</div>
-          <div class="timeCell ${inside ? "inProgress" : (rec.inTs ? "" : "muted")}">${escapeHtml(durationTxt)}</div>
-
-          <div class="actionCell">
-            <button class="btn actionBtn ${btnClass}" type="button" data-action="punch" data-emp="${emp.id}">
-              ${escapeHtml(btnLabel)}
-            </button>
-          </div>
-        </div>
-      `;
-    }).join("");
   }
 
-  function renderSummary() {
-    const key = getDateKey(viewDate);
-    const now = new Date();
-    const isToday = (getDateKey(now) === key);
+  // ────────────────────────────────────────────────────────────────────────────
+  // Render: Resumen
+  // ────────────────────────────────────────────────────────────────────────────
+  function renderResumen() {
+    const todayKey = dateKeyLocal(new Date());
+    summaryTableBody.innerHTML = "";
 
-    let inside = 0;
-    let onShift = 0;
-    let noShift = 0;
-    let completed = 0;
-    let totalHoursMs = 0;
+    for (const emp of state.employees.filter(e => e.active).sort((a,b)=>a.name.localeCompare(b.name,"es"))) {
+      const slot = scheduleForToday(emp);
+      const day = calcDay(emp.id, todayKey);
 
-    state.employees.forEach(emp => {
-      const rec = getEmpRecord(key, emp.id);
-      const shift = getShiftForEmployeeOnDate(emp, viewDate);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><b>${esc(emp.name)}</b></td>
+        <td class="small">${esc(slot.enabled ? `${slot.start}–${slot.end} (${slot.breakMin}m)` : "—")}</td>
+        <td>${esc(day.inTs ? fmtTime(day.inTs) : "—")}</td>
+        <td>${esc(day.outTs ? fmtTime(day.outTs) : "—")}</td>
+        <td>${esc(fmtHMFromMinutes(minutesFromMs(day.breakMs)))}</td>
+        <td><b>${esc(fmtHMFromMinutes(minutesFromMs(day.workMs)))}</b></td>
+        <td>${esc(day.status)}</td>
+      `;
+      summaryTableBody.appendChild(tr);
+    }
+  }
 
-      if (!shift) noShift += 1;
+  // ────────────────────────────────────────────────────────────────────────────
+  // Render: Historial
+  // ────────────────────────────────────────────────────────────────────────────
+  const fEmp = $("#fEmp");
+  const fFrom = $("#fFrom");
+  const fTo = $("#fTo");
 
-      const isInside = !!rec.inTs && !rec.outTs;
-      const isCompleted = !!rec.inTs && !!rec.outTs;
+  function renderHistoryFilters() {
+    // empleado selector
+    fEmp.innerHTML = `<option value="__all__">Todos</option>`;
+    for (const e of state.employees.slice().sort((a,b)=>a.name.localeCompare(b.name,"es"))) {
+      const opt = document.createElement("option");
+      opt.value = e.id;
+      opt.textContent = e.name;
+      fEmp.appendChild(opt);
+    }
 
-      if (isInside) inside += 1;
-      if (isCompleted) {
-        completed += 1;
-        totalHoursMs += Math.max(0, rec.outTs - rec.inTs);
-      }
+    const today = dateKeyLocal(new Date());
+    if (!fFrom.value) fFrom.value = today;
+    if (!fTo.value) fTo.value = today;
+  }
 
-      if (shift && isToday && !rec.inTs && !rec.outTs && isWithinShiftNow(shift, now)) {
-        onShift += 1;
-      }
+  function renderHistoryTable() {
+    const empId = fEmp.value || "__all__";
+    const from = (fFrom.value || dateKeyLocal(new Date()));
+    const to = (fTo.value || dateKeyLocal(new Date()));
+
+    const fromTs = new Date(from + "T00:00:00").getTime();
+    const toTs = new Date(to + "T23:59:59").getTime();
+
+    const rows = state.events
+      .filter(ev => (empId === "__all__" || ev.empId === empId))
+      .filter(ev => ev.ts >= fromTs && ev.ts <= toTs)
+      .sort((a,b)=> b.ts - a.ts)
+      .slice(0, 1500);
+
+    eventsTableBody.innerHTML = "";
+    for (const ev of rows) {
+      const emp = getEmpById(ev.empId);
+      const d = new Date(ev.ts);
+      const loc = (ev.lat != null && ev.lng != null) ? `${ev.lat},${ev.lng}` : "—";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${esc(dateKeyLocal(d))}</td>
+        <td>${esc(fmtTime(ev.ts))}</td>
+        <td><b>${esc(emp?.name || ev.empId)}</b></td>
+        <td>${esc(typeLabel(ev.type))}</td>
+        <td>${esc(ev.note || "")}</td>
+        <td class="mono">${esc(loc)}</td>
+        <td class="mono">${esc((ev.hash || "").slice(0, 18) + "…")}</td>
+      `;
+      eventsTableBody.appendChild(tr);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Render: Ajustes (empleados)
+  // ────────────────────────────────────────────────────────────────────────────
+  function renderEmployeeAdmin() {
+    employeeAdminList.innerHTML = "";
+
+    const list = state.employees.slice().sort((a,b)=>a.name.localeCompare(b.name,"es"));
+    for (const emp of list) {
+      const row = document.createElement("div");
+      row.className = "emp";
+      row.innerHTML = `
+        <div class="emp-left">
+          <div class="avatar" style="background: linear-gradient(135deg, ${esc(emp.color)}22, rgba(255,255,255,.06)); border-color: ${esc(emp.color)}55">${esc(emp.name.slice(0,1).toUpperCase())}</div>
+          <div class="emp-meta">
+            <div class="emp-name">${esc(emp.name)} ${emp.active ? "" : `<span class="pill off">Inactivo</span>`}</div>
+            <div class="emp-sub">
+              <span class="pill">ID: <span class="mono">${esc(emp.id)}</span></span>
+              <span class="pill">Horario semanal editable</span>
+            </div>
+          </div>
+        </div>
+        <div class="emp-right">
+          <button class="btn btn-ghost" data-act="toggle" data-id="${esc(emp.id)}">${emp.active ? "Desactivar" : "Activar"}</button>
+          <button class="btn" data-act="edit" data-id="${esc(emp.id)}">Editar</button>
+          <button class="btn btn-danger" data-act="del" data-id="${esc(emp.id)}">Eliminar</button>
+        </div>
+      `;
+
+      row.addEventListener("click", async (e) => {
+        const t = e.target;
+        if (!(t instanceof HTMLElement)) return;
+        const act = t.getAttribute("data-act");
+        const id = t.getAttribute("data-id");
+        if (!act || !id) return;
+
+        if (act === "toggle") {
+          const x = getEmpById(id);
+          if (!x) return;
+          x.active = !x.active;
+          saveState();
+          toast("ok", x.active ? "Empleado activado" : "Empleado desactivado");
+          renderAll();
+          return;
+        }
+
+        if (act === "edit") {
+          await editEmployeeFlow(id);
+          return;
+        }
+
+        if (act === "del") {
+          const ok = await openModal({
+            title: "Eliminar empleado",
+            bodyHtml: `<div class="muted">Se eliminará el empleado y <b>sus eventos</b>. ¿Continuar?</div>`,
+            actions: [
+              { label: "Cancelar", className: "btn btn-ghost", onClick: () => null },
+              { label: "Eliminar", className: "btn btn-danger", onClick: () => true },
+            ],
+          });
+          if (!ok) return;
+
+          state.events = state.events.filter(ev => ev.empId !== id);
+          state.employees = state.employees.filter(e => e.id !== id);
+          saveState();
+          toast("ok", "Empleado eliminado");
+          renderAll();
+        }
+      });
+
+      employeeAdminList.appendChild(row);
+    }
+  }
+
+  async function editEmployeeFlow(empId) {
+    const emp = getEmpById(empId);
+    if (!emp) return;
+
+    const body = `
+      <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px">
+        <label class="field">
+          <span>Nombre</span>
+          <input id="empName" value="${esc(emp.name)}" />
+        </label>
+        <label class="field">
+          <span>Color</span>
+          <input id="empColor" type="color" value="${esc(emp.color)}" />
+        </label>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div class="card" style="padding:12px; background: rgba(255,255,255,.04)">
+        <div class="card-title" style="margin:0 0 8px">Horario semanal</div>
+        <div class="small muted">Activa/desactiva días y define horas.</div>
+        <div style="height:8px"></div>
+
+        <div class="list">
+          ${DAYS.map(d => {
+            const s = emp.schedule[d.key];
+            return `
+              <div class="card" style="padding:12px; border-radius:16px; background: rgba(255,255,255,.04)">
+                <div class="row row-between">
+                  <div style="font-weight:900">${esc(d.label)}</div>
+                  <label class="toggle" title="En turno">
+                    <input type="checkbox" data-sch="${esc(d.key)}" data-k="enabled" ${s.enabled ? "checked":""} />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="row" style="margin-top:10px">
+                  <label class="field" style="flex:1; min-width:160px">
+                    <span>Inicio</span>
+                    <input type="time" data-sch="${esc(d.key)}" data-k="start" value="${esc(s.start)}" />
+                  </label>
+                  <label class="field" style="flex:1; min-width:160px">
+                    <span>Fin</span>
+                    <input type="time" data-sch="${esc(d.key)}" data-k="end" value="${esc(s.end)}" />
+                  </label>
+                  <label class="field" style="width:160px">
+                    <span>Pausa (min)</span>
+                    <input type="number" min="0" max="240" data-sch="${esc(d.key)}" data-k="breakMin" value="${esc(s.breakMin)}" />
+                  </label>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+
+    const res = await openModal({
+      title: "Editar empleado",
+      bodyHtml: body,
+      actions: [
+        { label: "Cancelar", className: "btn btn-ghost", onClick: () => null },
+        {
+          label: "Guardar",
+          className: "btn btn-primary",
+          onClick: () => {
+            const name = $("#empName").value.trim() || "Empleado";
+            const color = $("#empColor").value || "#7c5cff";
+
+            emp.name = name;
+            emp.color = color;
+
+            $$("[data-sch]").forEach(inp => {
+              const dayKey = inp.getAttribute("data-sch");
+              const k = inp.getAttribute("data-k");
+              if (!emp.schedule[dayKey]) emp.schedule[dayKey] = { enabled: false, start: "09:00", end: "17:00", breakMin: 30 };
+
+              if (k === "enabled") emp.schedule[dayKey].enabled = !!inp.checked;
+              if (k === "start") emp.schedule[dayKey].start = inp.value || "09:00";
+              if (k === "end") emp.schedule[dayKey].end = inp.value || "17:00";
+              if (k === "breakMin") emp.schedule[dayKey].breakMin = clampInt(inp.value, 0, 240);
+            });
+
+            saveState();
+            toast("ok", "Empleado guardado");
+            renderAll();
+            return true;
+          }
+        }
+      ]
     });
 
-    const total = state.employees.length;
-    const updateTime = fmtTime(now.getTime());
-
-<<<<<<< ours
-    el.summarySub.textContent = `Fecha: ${key} · Actualizado ${updateTime}`;
-=======
-    el.summarySub.textContent = isToday
-      ? `Fecha: ${key} · Actualizado ${updateTime}`
-      : `Histórico · Fecha: ${key}`;
->>>>>>> theirs
-    el.summaryTotal.textContent = String(total);
-    el.summaryInside.textContent = String(inside);
-    el.summaryOnShift.textContent = String(onShift);
-    el.summaryNoShift.textContent = String(noShift);
-    el.summaryCompleted.textContent = String(completed);
-    el.summaryHours.textContent = fmtDuration(totalHoursMs);
-<<<<<<< ours
+    return res;
   }
 
-  function renderSummary() {
-    const key = getDateKey(viewDate);
-    const now = new Date();
-    const isToday = (getDateKey(now) === key);
-
-    let inside = 0;
-    let onShift = 0;
-    let noShift = 0;
-    let completed = 0;
-    let totalHoursMs = 0;
-
-    state.employees.forEach(emp => {
-      const rec = getEmpRecord(key, emp.id);
-      const shift = getShiftForEmployeeOnDate(emp, viewDate);
-
-      if (!shift) noShift += 1;
-
-      const isInside = !!rec.inTs && !rec.outTs;
-      const isCompleted = !!rec.inTs && !!rec.outTs;
-
-      if (isInside) inside += 1;
-      if (isCompleted) {
-        completed += 1;
-        totalHoursMs += Math.max(0, rec.outTs - rec.inTs);
-      }
-
-      if (shift && isToday && !rec.inTs && !rec.outTs && isWithinShiftNow(shift, now)) {
-        onShift += 1;
-      }
-    });
-
-    const total = state.employees.length;
-    const updateTime = fmtTime(now.getTime());
-
-    el.summarySub.textContent = `Fecha: ${key} · Actualizado ${updateTime}`;
-    el.summaryTotal.textContent = String(total);
-    el.summaryInside.textContent = String(inside);
-    el.summaryOnShift.textContent = String(onShift);
-    el.summaryNoShift.textContent = String(noShift);
-    el.summaryCompleted.textContent = String(completed);
-    el.summaryHours.textContent = fmtDuration(totalHoursMs);
-=======
-
-    const insidePct = total ? Math.round((inside / total) * 100) : 0;
-    const completedPct = total ? Math.round((completed / total) * 100) : 0;
-    el.summaryInsidePct.textContent = `${insidePct}%`;
-    el.summaryCompletedPct.textContent = `${completedPct}%`;
-    el.summaryInsideBar.style.setProperty("--value", `${insidePct}%`);
-    el.summaryCompletedBar.style.setProperty("--value", `${completedPct}%`);
->>>>>>> theirs
-  }
-
-  function renderEvents() {
-    const key = getDateKey(viewDate);
-    const evs = getEventsForDay(key).slice().reverse();
-
-    if (!evs.length) {
-      el.events.innerHTML = `
-        <div class="event">
-          <div class="eventLeft">
-            <div class="eventType">Sin eventos</div>
-            <div class="eventMeta">Aún no hay fichajes registrados para este día.</div>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    el.events.innerHTML = evs.map(ev => {
-      const typeTxt =
-        ev.type === "IN" ? "✅ Entrada" :
-        ev.type === "OUT" ? "⛔ Salida" :
-        ev.type === "RESET" ? "🧹 Reset" :
-        "• Evento";
-
-      const meta = `${fmtFull(ev.ts)} · ${escapeHtml(ev.empName || "")}`;
-      const note = ev.payload?.note ? `<div class="eventNote">${escapeHtml(ev.payload.note)}</div>` : "";
-      return `
-        <div class="event">
-          <div class="eventLeft">
-            <div class="eventType">${typeTxt}</div>
-            <div class="eventMeta">${meta}</div>
-            ${note}
-          </div>
-        </div>
-      `;
-    }).join("");
-  }
-
-  async function handlePunch(emp) {
-    const key = getDateKey(viewDate);
-    const rec = getEmpRecord(key, emp.id);
-
-    // Si ya tiene entrada y salida, pedimos reset (o ignoramos)
-    if (rec.inTs && rec.outTs) {
-      const ok = confirm(`${emp.name} ya tiene entrada y salida en ${key}.\n\n¿Quieres reiniciar el fichaje de ese día para este empleado?`);
-      if (!ok) return;
-      rec.inTs = 0;
-      rec.outTs = 0;
-      addEvent("RESET", emp, key, {});
-      saveState();
-      renderAll();
-      return;
-    }
-
-    // Fichar entrada o salida
-    if (!rec.inTs) {
-      rec.inTs = nowMs();
-      addEvent("IN", emp, key, {});
-    } else if (!rec.outTs) {
-      rec.outTs = nowMs();
-      addEvent("OUT", emp, key, {});
-    }
-
+  async function addEmployeeFlow() {
+    const temp = { id: uid("emp"), name: "Nuevo empleado", color: "#7c5cff", active: true, schedule: defaultSchedule() };
+    state.employees.push(temp);
     saveState();
-    scheduleRender();
+    await editEmployeeFlow(temp.id);
   }
 
-  // Export CSV
-  function csvEscape(v) {
-    const s = String(v ?? "");
-    if (/[",\n\r]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
-    return s;
-  }
-
-  function downloadText(filename, text, mime = "text/plain;charset=utf-8") {
+  // ────────────────────────────────────────────────────────────────────────────
+  // Export
+  // ────────────────────────────────────────────────────────────────────────────
+  function downloadFile(filename, text, mime = "text/plain") {
     const blob = new Blob([text], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -661,443 +939,272 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    setTimeout(() => URL.revokeObjectURL(url), 1200);
   }
 
-  async function exportDayCSV() {
-    if (!(await ensurePinAllowed())) return;
+  function csvEscape(v) {
+    const s = String(v ?? "");
+    if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
 
-    const key = getDateKey(viewDate);
-    const header = ["fecha", "empleado", "turno", "entrada", "salida"].join(",");
-    const rows = [header];
+  function buildResumenCSV() {
+    const todayKey = dateKeyLocal(new Date());
+    const header = ["fecha","empleado","horario","entrada","salida","pausa_min","trabajado_min","estado"].join(",");
+    const lines = [header];
 
-    for (const emp of state.employees) {
-      const shift = getShiftForEmployeeOnDate(emp, viewDate);
-      const shiftTxt = shift ? `${shift.start}-${shift.end}` : "";
-      const rec = getEmpRecord(key, emp.id);
+    for (const emp of state.employees.filter(e=>e.active).sort((a,b)=>a.name.localeCompare(b.name,"es"))) {
+      const slot = scheduleForToday(emp);
+      const day = calcDay(emp.id, todayKey);
 
-      rows.push([
-        key,
-        emp.name,
-        shiftTxt,
-        rec.inTs ? fmtTime(rec.inTs) : "",
-        rec.outTs ? fmtTime(rec.outTs) : ""
-      ].map(csvEscape).join(","));
+      const horario = slot.enabled ? `${slot.start}-${slot.end} pausa ${slot.breakMin}m` : "";
+      lines.push([
+        todayKey,
+        csvEscape(emp.name),
+        csvEscape(horario),
+        day.inTs ? fmtTime(day.inTs) : "",
+        day.outTs ? fmtTime(day.outTs) : "",
+        minutesFromMs(day.breakMs),
+        minutesFromMs(day.workMs),
+        csvEscape(day.status),
+      ].join(","));
     }
 
-    const company = (state.settings.company || "empresa").replaceAll(" ", "_");
-    downloadText(`${company}_fichaje_${key}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
+    return lines.join("\n");
   }
 
-  async function exportWeekCSV() {
-    if (!(await ensurePinAllowed())) return;
+  function buildEventosCSV() {
+    const empId = fEmp.value || "__all__";
+    const from = (fFrom.value || dateKeyLocal(new Date()));
+    const to = (fTo.value || dateKeyLocal(new Date()));
 
-    const base = new Date(viewDate);
-    // Semana “visual”: lunes a domingo
-    const idx = weekdayIndex(base); // 0..6 (Dom..Sáb)
-    // Convertir a lunes: si idx=0 (Dom) retrocede 6, si idx=1 (Lun) 0, etc.
-    const backToMonday = (idx === 0) ? -6 : (1 - idx);
-    const monday = clampDay(base, backToMonday);
+    const fromTs = new Date(from + "T00:00:00").getTime();
+    const toTs = new Date(to + "T23:59:59").getTime();
 
-    const header = ["fecha", "dia", "empleado", "turno", "entrada", "salida"].join(",");
-    const rows = [header];
+    const header = ["ts_iso","fecha","hora","empleado","tipo","nota","lat","lng","hash","prevHash"].join(",");
+    const lines = [header];
 
-    for (let i = 0; i < 7; i++) {
-      const d = clampDay(monday, i);
-      const key = getDateKey(d);
-      const dayName = DAY_NAMES[weekdayIndex(d)];
+    const rows = state.events
+      .filter(ev => (empId === "__all__" || ev.empId === empId))
+      .filter(ev => ev.ts >= fromTs && ev.ts <= toTs)
+      .sort((a,b)=> a.ts - b.ts);
 
-      for (const emp of state.employees) {
-        const shift = getShiftForEmployeeOnDate(emp, d);
-        const shiftTxt = shift ? `${shift.start}-${shift.end}` : "";
-        const rec = getEmpRecord(key, emp.id);
-
-        rows.push([
-          key,
-          dayName,
-          emp.name,
-          shiftTxt,
-          rec.inTs ? fmtTime(rec.inTs) : "",
-          rec.outTs ? fmtTime(rec.outTs) : ""
-        ].map(csvEscape).join(","));
-      }
+    for (const ev of rows) {
+      const emp = getEmpById(ev.empId);
+      const d = new Date(ev.ts);
+      lines.push([
+        csvEscape(d.toISOString()),
+        dateKeyLocal(d),
+        fmtTime(ev.ts),
+        csvEscape(emp?.name || ev.empId),
+        csvEscape(typeLabel(ev.type)),
+        csvEscape(ev.note || ""),
+        (ev.lat ?? ""),
+        (ev.lng ?? ""),
+        csvEscape(ev.hash || ""),
+        csvEscape(ev.prevHash || ""),
+      ].join(","));
     }
 
-    const company = (state.settings.company || "empresa").replaceAll(" ", "_");
-    downloadText(`${company}_fichaje_semana_${getDateKey(monday)}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
+    return lines.join("\n");
   }
 
-  // Settings modal
-  function openSettings() {
-    el.inpCompany.value = state.settings.company || "";
-    el.chkPin.checked = !!state.settings.requirePin;
-    el.inpPin.value = "";
+  // ────────────────────────────────────────────────────────────────────────────
+  // Backup/Restore/Wipe
+  // ────────────────────────────────────────────────────────────────────────────
+  const filePicker = $("#filePicker");
 
-    el.settingsBackdrop.hidden = false;
-    el.settingsModal.hidden = false;
-
-    renderEmpAdmin();
+  function exportBackup() {
+    const data = JSON.stringify(state, null, 2);
+    downloadFile(`clockin_backup_${dateKeyLocal(new Date())}.json`, data, "application/json");
   }
 
-  function closeSettings() {
-    el.settingsBackdrop.hidden = true;
-    el.settingsModal.hidden = true;
+  function importBackupFlow() {
+    filePicker.value = "";
+    filePicker.click();
   }
 
-  async function saveSettings() {
-    state.settings.company = (el.inpCompany.value.trim().slice(0, 40) || "Panel de Fichaje");
-    const requirePin = !!el.chkPin.checked;
-    state.settings.requirePin = requirePin;
-
-    const newPin = el.inpPin.value.trim();
-    if (requirePin) {
-      if (newPin.length >= 4 && newPin.length <= 10 && /^\d+$/.test(newPin)) {
-        const salt = randomSalt();
-        const hash = await pbkdf2Hex(newPin, salt);
-        state.settings.pinSalt = salt;
-        state.settings.pinHash = hash;
-      } else if (!state.settings.pinHash) {
-        alert("Activas PIN, pero no has puesto un PIN válido (4–10 dígitos).");
-        return;
-      }
-    } else {
-      state.settings.pinSalt = "";
-      state.settings.pinHash = "";
+  filePicker?.addEventListener("change", async () => {
+    const f = filePicker.files?.[0];
+    if (!f) return;
+    const text = await f.text();
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object") throw new Error("Formato inválido");
+      // Fusiona de forma segura
+      state = parsed;
+      state = loadStateFromObject(state);
+      saveState();
+      toast("ok", "Copia importada");
+      renderAll();
+    } catch {
+      toast("bad", "No se pudo importar el JSON");
     }
+  });
 
-    saveState();
-    closeSettings();
-    scheduleRender();
-  }
-
-  // Employee admin
-  function renderEmpAdmin() {
-    if (!el.empAdminList) return;
-
-    el.empAdminList.innerHTML = state.employees.map(emp => {
-      const initial = emp.name.trim().slice(0, 1).toUpperCase();
-      return `
-        <div class="empAdminItem">
-          <div class="empAdminLeft">
-            <div class="avatar" style="background:${escapeHtml(emp.color)}22;border-color:${escapeHtml(emp.color)}33;">
-              ${escapeHtml(initial)}
-            </div>
-            <div style="min-width:0;">
-              <div class="empAdminName">${escapeHtml(emp.name)}</div>
-              <div class="empMeta">${escapeHtml(emp.note || "")}</div>
-            </div>
-          </div>
-          <div class="empAdminBtns">
-            <button class="btn" type="button" data-action="edit" data-emp="${emp.id}">Horario</button>
-            <button class="btn ghost" type="button" data-action="rename" data-emp="${emp.id}">Renombrar</button>
-            <button class="btn ghost" type="button" data-action="remove" data-emp="${emp.id}">Eliminar</button>
-          </div>
-        </div>
-      `;
-    }).join("");
-
-    el.empAdminList.querySelectorAll("button[data-action]").forEach(b => {
-      b.addEventListener("click", () => {
-        const action = b.getAttribute("data-action");
-        const empId = b.getAttribute("data-emp");
-        const emp = state.employees.find(e => e.id === empId);
-        if (!emp) return;
-
-        if (action === "edit") openEditEmployee(emp);
-        if (action === "rename") renameEmployee(emp);
-        if (action === "remove") removeEmployee(emp);
-      });
-    });
-  }
-
-  function addEmployee() {
-    const name = el.inpNewEmployee.value.trim();
-    if (!name) return;
-
-    const color = el.inpNewColor.value || "#6ee7ff";
-    state.employees.push(createEmployee(name, color));
-
-    el.inpNewEmployee.value = "";
-    saveState();
-    renderEmpAdmin();
-    scheduleRender();
-  }
-
-  function renameEmployee(emp) {
-    const v = prompt("Nuevo nombre:", emp.name);
-    if (v == null) return;
-    const n = v.trim().slice(0, 40);
-    if (!n) return;
-    emp.name = n;
-    saveState();
-    renderEmpAdmin();
-    scheduleRender();
-  }
-
-  function removeEmployee(emp) {
-    const ok = confirm(`¿Eliminar a ${emp.name}?`);
-    if (!ok) return;
-
-    state.employees = state.employees.filter(e => e.id !== emp.id);
-
-    // No borramos records por seguridad; quedan “huérfanos”
-    saveState();
-    renderEmpAdmin();
-    scheduleRender();
-  }
-
-  // Edit schedule modal
-  let editingEmp = null;
-
-  function openEditEmployee(emp) {
-    editingEmp = emp;
-    el.editTitle.textContent = "Editar horario";
-    el.editSub.textContent = emp.name;
-
-    el.inpEmpNote.value = emp.note || "";
-    renderScheduleGrid(emp);
-
-    el.editBackdrop.hidden = false;
-    el.editModal.hidden = false;
-  }
-
-  function closeEditEmployee() {
-    el.editBackdrop.hidden = true;
-    el.editModal.hidden = true;
-    editingEmp = null;
-  }
-
-  function renderScheduleGrid(emp) {
-    const html = [];
-    for (let i = 0; i < 7; i++) {
-      const d = DAY_NAMES[i];
-      const s = emp.weekly?.[i] || null;
-      const start = s?.start || "";
-      const end = s?.end || "";
-
-      html.push(`
-        <div class="dayCard" data-day="${i}">
-          <div class="dayTitle">${d}</div>
-          <div class="dayRow">
-            <input class="input" type="time" data-k="start" value="${escapeHtml(start)}" />
-            <input class="input" type="time" data-k="end" value="${escapeHtml(end)}" />
-          </div>
-          <div class="hint">Vacío = sin turno</div>
-        </div>
-      `);
+  function loadStateFromObject(obj) {
+    // Reusa la normalización de loadState sin tocar localStorage
+    try {
+      const raw = JSON.stringify(obj);
+      localStorage.setItem("__tmp__", raw);
+      const old = localStorage.getItem(STORAGE_KEY);
+      localStorage.setItem(STORAGE_KEY, raw);
+      const s = loadState();
+      // restaura old
+      if (old != null) localStorage.setItem(STORAGE_KEY, old);
+      else localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("__tmp__");
+      return s;
+    } catch {
+      return defaultState();
     }
-    el.scheduleGrid.innerHTML = html.join("");
   }
 
-  function applyTemplateWeek() {
-    if (!editingEmp) return;
-    // L-V 09-17
-    for (let i = 0; i < 7; i++) {
-      if (i >= 1 && i <= 5) editingEmp.weekly[i] = { start: "09:00", end: "17:00" };
-      else editingEmp.weekly[i] = null;
-    }
-    renderScheduleGrid(editingEmp);
-  }
-
-  function clearSchedule() {
-    if (!editingEmp) return;
-    for (let i = 0; i < 7; i++) editingEmp.weekly[i] = null;
-    renderScheduleGrid(editingEmp);
-  }
-
-  function saveEditEmployee() {
-    if (!editingEmp) return;
-
-    editingEmp.note = el.inpEmpNote.value.trim().slice(0, 80);
-
-    // Leer inputs
-    el.scheduleGrid.querySelectorAll(".dayCard").forEach(card => {
-      const day = parseInt(card.getAttribute("data-day"), 10);
-      const start = card.querySelector('input[data-k="start"]').value;
-      const end = card.querySelector('input[data-k="end"]').value;
-
-      if (start && end) {
-        editingEmp.weekly[day] = { start, end };
-      } else {
-        editingEmp.weekly[day] = null;
-      }
+  async function wipeAllFlow() {
+    const ok1 = await openModal({
+      title: "Borrar todo",
+      bodyHtml: `<div class="muted">Esto borrará <b>empleados y eventos</b> en este dispositivo.</div>`,
+      actions: [
+        { label: "Cancelar", className: "btn btn-ghost", onClick: () => null },
+        { label: "Continuar", className: "btn btn-danger", onClick: () => true },
+      ]
     });
+    if (!ok1) return;
 
+    const okPin = await requirePinIfSet();
+    if (!okPin) return;
+
+    state = defaultState();
     saveState();
-    closeEditEmployee();
-    renderEmpAdmin();
-    scheduleRender();
+    toast("ok", "Datos borrados");
+    renderAll();
   }
 
-  // Clear day records
-  async function clearDayRecords() {
-    if (!(await ensurePinAllowed())) return;
-    const key = getDateKey(viewDate);
-    const ok = confirm(`¿Borrar fichajes del día ${key} para TODOS los empleados?`);
-    if (!ok) return;
-
-    state.records[key] = {};
-    addEvent("RESET", { id: "", name: "Sistema" }, key, { note: "Borrado día completo" });
-    saveState();
-    scheduleRender();
+  // ────────────────────────────────────────────────────────────────────────────
+  // Online/Offline badge
+  // ────────────────────────────────────────────────────────────────────────────
+  function updateOfflineBadge() {
+    const offline = !navigator.onLine;
+    uiOffline.hidden = !offline;
   }
+  window.addEventListener("online", updateOfflineBadge);
+  window.addEventListener("offline", updateOfflineBadge);
 
-  // PWA install prompt + SW
-  let deferredInstallPrompt = null;
+  // ────────────────────────────────────────────────────────────────────────────
+  // PWA SW update pill
+  // ────────────────────────────────────────────────────────────────────────────
+  const btnUpdate = $("#btnUpdate");
+  let waitingWorker = null;
 
-  function setupPWA() {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
-    }
-
-    window.addEventListener("beforeinstallprompt", (e) => {
-      e.preventDefault();
-      deferredInstallPrompt = e;
-      el.btnInstall.hidden = false;
-    });
-
-    el.btnInstall.addEventListener("click", async () => {
-      if (!deferredInstallPrompt) return;
-      deferredInstallPrompt.prompt();
-      try { await deferredInstallPrompt.userChoice; } catch {}
-      deferredInstallPrompt = null;
-      el.btnInstall.hidden = true;
-    });
-  }
-
-  // Render all
-  function renderAll() {
-    renderHeader();
-    renderDateControls();
-    renderSummary();
-    renderList();
-    renderEvents();
-  }
-
-  // Bind UI
-  function bindUI() {
-    // Date
-    el.datePicker.addEventListener("change", () => {
-      viewDate = parseDateInputValue(el.datePicker.value);
-      scheduleRender();
-    });
-
-    el.btnPrevDay.addEventListener("click", () => {
-      viewDate = clampDay(viewDate, -1);
-      scheduleRender();
-    });
-
-    el.btnNextDay.addEventListener("click", () => {
-      viewDate = clampDay(viewDate, 1);
-      scheduleRender();
-    });
-
-    el.btnToday.addEventListener("click", () => {
-      viewDate = new Date();
-      scheduleRender();
-    });
-
-    // Search
-    el.searchInput.addEventListener("input", () => {
-      if (searchTimer) window.clearTimeout(searchTimer);
-      searchTimer = window.setTimeout(() => {
-        searchQuery = el.searchInput.value.trim().toLowerCase();
-        renderList();
-      }, 120);
-    });
-
-    // Exports
-    el.btnExportDay.addEventListener("click", exportDayCSV);
-    el.btnExportWeek.addEventListener("click", exportWeekCSV);
-
-    // Clear day
-    el.btnClearDay.addEventListener("click", clearDayRecords);
-
-    // Settings
-    el.btnSettings.addEventListener("click", openSettings);
-    el.btnCloseSettings.addEventListener("click", closeSettings);
-    el.btnCancelSettings.addEventListener("click", closeSettings);
-    el.settingsBackdrop.addEventListener("click", closeSettings);
-    el.btnSaveSettings.addEventListener("click", saveSettings);
-
-    // Add employee
-    el.btnAddEmployee.addEventListener("click", addEmployee);
-    el.inpNewEmployee.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") addEmployee();
-    });
-
-    // Edit modal
-    el.btnCloseEdit.addEventListener("click", closeEditEmployee);
-    el.btnCancelEdit.addEventListener("click", closeEditEmployee);
-    el.editBackdrop.addEventListener("click", closeEditEmployee);
-    el.btnSaveEdit.addEventListener("click", saveEditEmployee);
-
-    el.btnTemplateWeek.addEventListener("click", applyTemplateWeek);
-    el.btnClearSchedule.addEventListener("click", clearSchedule);
-
-<<<<<<< ours
-    el.filterButtons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        const filter = btn.getAttribute("data-filter");
-        if (!filter || filter === activeFilter) return;
-        activeFilter = filter;
-        el.filterButtons.forEach(b => {
-          const isActive = b.getAttribute("data-filter") === activeFilter;
-          b.classList.toggle("is-active", isActive);
-          b.setAttribute("aria-selected", String(isActive));
+  async function registerSW() {
+    if (!("serviceWorker" in navigator)) return;
+    try {
+      const reg = await navigator.serviceWorker.register("./sw.js");
+      reg.addEventListener("updatefound", () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", () => {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) {
+            waitingWorker = nw;
+            btnUpdate.hidden = false;
+          }
         });
-        renderList();
       });
-    });
-
-=======
->>>>>>> theirs
-    el.employeeList.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      const button = target.closest('button[data-action="punch"]');
-      if (!button) return;
-      const empId = button.getAttribute("data-emp");
-      const emp = state.employees.find(e => e.id === empId);
-      if (!emp) return;
-      handlePunch(emp);
-    });
-
-    // Esc
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        closeEditEmployee();
-        closeSettings();
-      }
-    });
+    } catch {
+      // nada
+    }
   }
+
+  btnUpdate?.addEventListener("click", async () => {
+    if (!waitingWorker) return;
+    try {
+      waitingWorker.postMessage({ type: "SKIP_WAITING" });
+      toast("ok", "Actualizando…");
+      setTimeout(() => location.reload(), 350);
+    } catch {
+      location.reload();
+    }
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Bind buttons
+  // ────────────────────────────────────────────────────────────────────────────
+  $("#btnSetPin")?.addEventListener("click", setPinFlow);
+  $("#btnClearPin")?.addEventListener("click", clearPinFlow);
+
+  $("#tglGeo")?.addEventListener("change", (e) => {
+    state.settings.geoEnabled = !!e.target.checked;
+    saveState();
+    toast("ok", state.settings.geoEnabled ? "Geolocalización activada" : "Geolocalización desactivada");
+  });
+
+  $("#btnAddEmp")?.addEventListener("click", addEmployeeFlow);
+  btnQuickAdd?.addEventListener("click", addEmployeeFlow);
+
+  $("#btnExportResumen")?.addEventListener("click", async () => {
+    const ok = await requirePinIfSet();
+    if (!ok) return;
+    const csv = buildResumenCSV();
+    downloadFile(`clockin_resumen_${dateKeyLocal(new Date())}.csv`, csv, "text/csv");
+    toast("ok", "Resumen exportado");
+  });
+
+  $("#btnExportEventos")?.addEventListener("click", async () => {
+    const ok = await requirePinIfSet();
+    if (!ok) return;
+    const csv = buildEventosCSV();
+    downloadFile(`clockin_eventos_${dateKeyLocal(new Date())}.csv`, csv, "text/csv");
+    toast("ok", "Eventos exportados");
+  });
+
+  $("#btnApplyFilters")?.addEventListener("click", () => {
+    renderHistoryTable();
+    toast("ok", "Filtros aplicados");
+  });
+
+  $("#btnBackup")?.addEventListener("click", async () => {
+    const ok = await requirePinIfSet();
+    if (!ok) return;
+    exportBackup();
+    toast("ok", "Copia exportada");
+  });
+
+  $("#btnRestore")?.addEventListener("click", async () => {
+    const ok = await requirePinIfSet();
+    if (!ok) return;
+    importBackupFlow();
+  });
+
+  $("#btnWipe")?.addEventListener("click", wipeAllFlow);
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Render all
+  // ────────────────────────────────────────────────────────────────────────────
+  function renderAll() {
+    uiVer.textContent = APP_VERSION;
+
+    const now = new Date();
+    uiDateConsider.textContent = fmtDateHuman(now).replace(/^./, c => c.toUpperCase());
+
+    $("#tglGeo").checked = !!state.settings.geoEnabled;
+
+    renderPanel();
+    renderResumen();
+    renderHistoryFilters();
+    renderHistoryTable();
+    renderEmployeeAdmin();
+
+    updateOfflineBadge();
+  }
+
+  // init route
+  setRoute(getRoute());
+  window.addEventListener("hashchange", () => {
+    setRoute(getRoute());
+    renderAll();
+  });
 
   // Boot
-  function boot() {
-    // Fecha inicial = hoy
-    viewDate = new Date();
-    el.datePicker.value = toDateInputValue(viewDate);
-
-    bindUI();
-    setupPWA();
-    renderAll();
-
-    if (el.liveClock) {
-      el.liveClock.textContent = fmtClock(new Date());
-    }
-
-    // refresco suave del estado "En turno" (solo UI)
-    setInterval(() => {
-      const now = new Date();
-      if (el.liveClock) el.liveClock.textContent = fmtClock(now);
-      if (getDateKey(viewDate) === getDateKey(now)) {
-        scheduleRender();
-      }
-    }, 30000);
-
-    console.log("[Smouj013] Panel de fichaje listo.");
-  }
-
-  boot();
-
+  renderAll();
+  registerSW();
 })();
