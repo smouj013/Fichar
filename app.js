@@ -36,6 +36,18 @@
     summaryCompleted: $("summaryCompleted"),
     summaryHours: $("summaryHours"),
 
+    summarySub: $("summarySub"),
+    summaryTotal: $("summaryTotal"),
+    summaryInside: $("summaryInside"),
+    summaryOnShift: $("summaryOnShift"),
+    summaryNoShift: $("summaryNoShift"),
+    summaryCompleted: $("summaryCompleted"),
+    summaryHours: $("summaryHours"),
+    summaryInsidePct: $("summaryInsidePct"),
+    summaryCompletedPct: $("summaryCompletedPct"),
+    summaryInsideBar: $("summaryInsideBar"),
+    summaryCompletedBar: $("summaryCompletedBar"),
+
     events: $("events"),
 
     btnExportDay: $("btnExportDay"),
@@ -70,6 +82,7 @@
     inpEmpNote: $("inpEmpNote"),
 
     btnInstall: $("btnInstall"),
+    liveClock: $("liveClock"),
   };
 
   // Helpers
@@ -113,6 +126,17 @@
     return `${hours}h ${pad2(minutes)}m`;
   }
 
+<<<<<<< ours
+=======
+  function fmtClock(dateObj) {
+    return new Intl.DateTimeFormat("es-ES", {
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(dateObj);
+  }
+
+>>>>>>> theirs
   function weekdayIndex(dateObj) {
     // JS: 0=Dom..6=Sáb
     return dateObj.getDay();
@@ -487,13 +511,20 @@
     const total = state.employees.length;
     const updateTime = fmtTime(now.getTime());
 
+<<<<<<< ours
     el.summarySub.textContent = `Fecha: ${key} · Actualizado ${updateTime}`;
+=======
+    el.summarySub.textContent = isToday
+      ? `Fecha: ${key} · Actualizado ${updateTime}`
+      : `Histórico · Fecha: ${key}`;
+>>>>>>> theirs
     el.summaryTotal.textContent = String(total);
     el.summaryInside.textContent = String(inside);
     el.summaryOnShift.textContent = String(onShift);
     el.summaryNoShift.textContent = String(noShift);
     el.summaryCompleted.textContent = String(completed);
     el.summaryHours.textContent = fmtDuration(totalHoursMs);
+<<<<<<< ours
   }
 
   function renderSummary() {
@@ -537,6 +568,15 @@
     el.summaryNoShift.textContent = String(noShift);
     el.summaryCompleted.textContent = String(completed);
     el.summaryHours.textContent = fmtDuration(totalHoursMs);
+=======
+
+    const insidePct = total ? Math.round((inside / total) * 100) : 0;
+    const completedPct = total ? Math.round((completed / total) * 100) : 0;
+    el.summaryInsidePct.textContent = `${insidePct}%`;
+    el.summaryCompletedPct.textContent = `${completedPct}%`;
+    el.summaryInsideBar.style.setProperty("--value", `${insidePct}%`);
+    el.summaryCompletedBar.style.setProperty("--value", `${completedPct}%`);
+>>>>>>> theirs
   }
 
   function renderEvents() {
@@ -995,6 +1035,7 @@
     el.btnTemplateWeek.addEventListener("click", applyTemplateWeek);
     el.btnClearSchedule.addEventListener("click", clearSchedule);
 
+<<<<<<< ours
     el.filterButtons.forEach(btn => {
       btn.addEventListener("click", () => {
         const filter = btn.getAttribute("data-filter");
@@ -1009,6 +1050,8 @@
       });
     });
 
+=======
+>>>>>>> theirs
     el.employeeList.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
@@ -1039,10 +1082,18 @@
     setupPWA();
     renderAll();
 
+    if (el.liveClock) {
+      el.liveClock.textContent = fmtClock(new Date());
+    }
+
     // refresco suave del estado "En turno" (solo UI)
     setInterval(() => {
-      renderList();
-    }, 15000);
+      const now = new Date();
+      if (el.liveClock) el.liveClock.textContent = fmtClock(now);
+      if (getDateKey(viewDate) === getDateKey(now)) {
+        scheduleRender();
+      }
+    }, 30000);
 
     console.log("[Smouj013] Panel de fichaje listo.");
   }

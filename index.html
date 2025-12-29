@@ -33,6 +33,9 @@
       </div>
 
       <div class="topActions">
+        <div class="topStatus">
+          <div class="statusPill" id="liveClock">—</div>
+        </div>
         <button class="btn ghost" id="btnExportDay" type="button" title="Exportar día">⬇️ Día</button>
         <button class="btn ghost" id="btnExportWeek" type="button" title="Exportar semana">⬇️ Semana</button>
         <button class="btn ghost" id="btnSettings" type="button" title="Ajustes">⚙️</button>
@@ -185,7 +188,72 @@
         </div>
       </section>
 
+<<<<<<< ours
 =======
+>>>>>>> theirs
+=======
+      <section class="card summaryCard">
+        <div class="cardHead">
+          <div>
+            <div class="cardTitle">Resumen del día</div>
+            <div class="cardSub" id="summarySub">—</div>
+          </div>
+          <div class="summaryHint">Actualización en tiempo real</div>
+        </div>
+        <div class="summaryGrid">
+          <div class="summaryItem accent-primary">
+            <div class="summaryLabel">Empleados</div>
+            <div class="summaryValue" id="summaryTotal">—</div>
+            <div class="summaryMeta">Activos hoy</div>
+          </div>
+          <div class="summaryItem accent-ok">
+            <div class="summaryLabel">Dentro</div>
+            <div class="summaryValue" id="summaryInside">—</div>
+            <div class="summaryMeta">En la oficina</div>
+          </div>
+          <div class="summaryItem accent-warn">
+            <div class="summaryLabel">En turno</div>
+            <div class="summaryValue" id="summaryOnShift">—</div>
+            <div class="summaryMeta">Sin fichar</div>
+          </div>
+          <div class="summaryItem accent-muted">
+            <div class="summaryLabel">Sin turno</div>
+            <div class="summaryValue" id="summaryNoShift">—</div>
+            <div class="summaryMeta">Sin horario</div>
+          </div>
+          <div class="summaryItem accent-info">
+            <div class="summaryLabel">Fichajes completos</div>
+            <div class="summaryValue" id="summaryCompleted">—</div>
+            <div class="summaryMeta">Entrada y salida</div>
+          </div>
+          <div class="summaryItem accent-primary">
+            <div class="summaryLabel">Horas registradas</div>
+            <div class="summaryValue" id="summaryHours">—</div>
+            <div class="summaryMeta">Total del día</div>
+          </div>
+        </div>
+        <div class="summaryBars">
+          <div class="summaryBar">
+            <div class="summaryBarTop">
+              <span>Ocupación (dentro)</span>
+              <span id="summaryInsidePct">—</span>
+            </div>
+            <div class="barTrack">
+              <div class="barFill barFill-ok" id="summaryInsideBar"></div>
+            </div>
+          </div>
+          <div class="summaryBar">
+            <div class="summaryBarTop">
+              <span>Fichajes completados</span>
+              <span id="summaryCompletedPct">—</span>
+            </div>
+            <div class="barTrack">
+              <div class="barFill barFill-info" id="summaryCompletedBar"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
 >>>>>>> theirs
       <section class="card listCard">
         <div class="listHead">

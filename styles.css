@@ -41,12 +41,16 @@ body{
 .app{ min-height:100%; display:flex; flex-direction:column; }
 
 .topbar{
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
   padding:14px 16px;
   border-bottom:1px solid var(--line);
   background: linear-gradient(180deg, rgba(20,20,30,.95), rgba(11,11,16,.75));
   backdrop-filter: blur(8px);
   position:sticky; top:0; z-index:10;
+  flex-wrap:wrap;
 }
 
 .brand{ display:flex; gap:12px; align-items:center; }
@@ -61,7 +65,24 @@ body{
 .title{ font-weight:900; letter-spacing:.2px; }
 .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
 
-.topActions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.topActions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:flex-end;
+}
+.topActions .btn{ white-space:nowrap; }
+.topStatus{ flex: 1 1 160px; }
+.topStatus{ display:flex; align-items:center; }
+.statusPill{
+  font-size:12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: rgba(232,232,238,.9);
+}
 
 .main{
   width:min(1100px, 100%);
@@ -69,6 +90,7 @@ body{
   padding:16px;
   display:flex; flex-direction:column; gap:14px;
 }
+.main > .card{ width:100%; }
 
 .card{
   background: linear-gradient(180deg, rgba(18,18,26,.92), rgba(15,15,22,.92));
@@ -80,6 +102,9 @@ body{
 
 <<<<<<< ours
 <<<<<<< ours
+<<<<<<< ours
+=======
+>>>>>>> theirs
 =======
 >>>>>>> theirs
 .cardHead{
@@ -90,7 +115,10 @@ body{
 }
 <<<<<<< ours
 <<<<<<< ours
+<<<<<<< ours
 =======
+=======
+>>>>>>> theirs
 =======
 >>>>>>> theirs
 .summaryHint{
@@ -102,6 +130,9 @@ body{
   background: rgba(0,0,0,.18);
 }
 <<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
 =======
 >>>>>>> theirs
@@ -109,6 +140,7 @@ body{
 .summaryGrid{
   margin-top: 12px;
   display:grid;
+<<<<<<< ours
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap:12px;
 }
@@ -118,6 +150,11 @@ body{
 @media (max-width:720px){
   .summaryGrid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+=======
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap:12px;
+}
+>>>>>>> theirs
 .summaryItem{
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(0,0,0,.14);
@@ -129,6 +166,11 @@ body{
   min-height: 76px;
 <<<<<<< ours
 <<<<<<< ours
+<<<<<<< ours
+=======
+  position: relative;
+  overflow: hidden;
+>>>>>>> theirs
 =======
   position: relative;
   overflow: hidden;
@@ -150,7 +192,10 @@ body{
 }
 <<<<<<< ours
 <<<<<<< ours
+<<<<<<< ours
 =======
+=======
+>>>>>>> theirs
 =======
 >>>>>>> theirs
 .summaryMeta{
@@ -171,11 +216,51 @@ body{
 .summaryItem.accent-muted::after{ background: linear-gradient(90deg, rgba(154,160,170,.7), rgba(154,160,170,.2)); }
 .summaryItem.accent-info::after{ background: linear-gradient(90deg, rgba(155,181,255,.9), rgba(155,181,255,.2)); }
 <<<<<<< ours
+<<<<<<< ours
 >>>>>>> theirs
 
 =======
 >>>>>>> theirs
 =======
+
+>>>>>>> theirs
+=======
+
+.summaryBars{
+  margin-top: 14px;
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap:12px;
+}
+.summaryBar{
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0,0,0,.12);
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.summaryBarTop{
+  display:flex;
+  justify-content:space-between;
+  font-size:12px;
+  color: rgba(232,232,238,.85);
+}
+.barTrack{
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  overflow:hidden;
+}
+.barFill{
+  height: 100%;
+  width: var(--value, 0%);
+  border-radius: inherit;
+  transition: width .2s ease;
+}
+.barFill-ok{ background: linear-gradient(90deg, rgba(112,255,180,.9), rgba(112,255,180,.4)); }
+.barFill-info{ background: linear-gradient(90deg, rgba(155,181,255,.9), rgba(155,181,255,.35)); }
 
 >>>>>>> theirs
 .controlsRow{
@@ -185,6 +270,15 @@ body{
 }
 @media (max-width:860px){
   .controlsRow{ grid-template-columns: 1fr; }
+}
+@media (max-width:760px){
+  .topbar{
+    align-items:flex-start;
+  }
+  .topActions{
+    width:100%;
+    justify-content:flex-start;
+  }
 }
 
 .filtersRow{
@@ -279,6 +373,16 @@ body{
   border-radius: 14px;
   overflow: hidden;
   background: rgba(0,0,0,.18);
+<<<<<<< ours
+=======
+}
+.tableWrap{
+  overflow-x: auto;
+}
+.tableHead,
+.row{
+  min-width: 720px;
+>>>>>>> theirs
 }
 
 .tableHead{
@@ -297,6 +401,15 @@ body{
 @media (max-width:860px){
   .tableHead{
     grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr 0.7fr;
+<<<<<<< ours
+=======
+  }
+  .tableHead > div:nth-child(6){ display:none; }
+}
+@media (max-width:720px){
+  .tableHead{
+    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr;
+>>>>>>> theirs
   }
   .tableHead > div:nth-child(6){ display:none; }
 }
@@ -322,6 +435,12 @@ body{
     grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr 0.7fr;
   }
   .row .actionCell{ display:none; }
+}
+@media (max-width:720px){
+  .row{
+    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr;
+  }
+  .row > :nth-child(5){ display:none; }
 }
 
 .empCell{
