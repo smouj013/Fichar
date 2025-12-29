@@ -76,12 +76,24 @@ body{
   padding: var(--pad);
 }
 
+<<<<<<< ours
 .cardHead{
   display:flex;
   justify-content:space-between;
   align-items:flex-start;
   gap:12px;
 }
+<<<<<<< ours
+=======
+.summaryHint{
+  font-size:12px;
+  color: rgba(232,232,238,.75);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(0,0,0,.18);
+}
+>>>>>>> theirs
 
 .summaryGrid{
   margin-top: 12px;
@@ -104,6 +116,11 @@ body{
   flex-direction:column;
   gap:6px;
   min-height: 76px;
+<<<<<<< ours
+=======
+  position: relative;
+  overflow: hidden;
+>>>>>>> theirs
 }
 .summaryLabel{
   font-size:12px;
@@ -115,7 +132,29 @@ body{
   font-size: 22px;
   font-weight: 900;
 }
+<<<<<<< ours
+=======
+.summaryMeta{
+  font-size:12px;
+  color: rgba(232,232,238,.75);
+}
+.summaryItem::after{
+  content:"";
+  position:absolute;
+  inset:auto auto 0 0;
+  width: 100%;
+  height: 3px;
+  background: rgba(255,255,255,.08);
+}
+.summaryItem.accent-primary::after{ background: linear-gradient(90deg, rgba(110,231,255,.8), rgba(110,231,255,.2)); }
+.summaryItem.accent-ok::after{ background: linear-gradient(90deg, rgba(112,255,180,.9), rgba(112,255,180,.2)); }
+.summaryItem.accent-warn::after{ background: linear-gradient(90deg, rgba(255,209,102,.9), rgba(255,209,102,.2)); }
+.summaryItem.accent-muted::after{ background: linear-gradient(90deg, rgba(154,160,170,.7), rgba(154,160,170,.2)); }
+.summaryItem.accent-info::after{ background: linear-gradient(90deg, rgba(155,181,255,.9), rgba(155,181,255,.2)); }
+>>>>>>> theirs
 
+=======
+>>>>>>> theirs
 .controlsRow{
   display:grid;
   grid-template-columns: 1.2fr 1fr;
@@ -184,7 +223,7 @@ body{
 
 .tableHead{
   display:grid;
-  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.7fr 0.8fr;
+  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.8fr;
   gap: 10px;
   padding: 12px 12px;
   font-size: 12px;
@@ -197,9 +236,9 @@ body{
 }
 @media (max-width:860px){
   .tableHead{
-    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr 0.7fr;
+    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr;
   }
-  .tableHead > div:nth-child(6){ display:none; }
+  .tableHead > div:nth-child(5){ display:none; }
 }
 
 .tableBody{
@@ -209,7 +248,7 @@ body{
 
 .row{
   display:grid;
-  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.7fr 0.8fr;
+  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.8fr;
   gap:10px;
   padding: 12px 12px;
   border-bottom: 1px solid rgba(255,255,255,.06);
@@ -218,7 +257,7 @@ body{
 .row:last-child{ border-bottom:none; }
 @media (max-width:860px){
   .row{
-    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr 0.7fr;
+    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr;
   }
   .row .actionCell{ display:none; }
 }
@@ -280,7 +319,6 @@ body{
   color: rgba(232,232,238,.95);
 }
 .timeCell.muted{ color: rgba(232,232,238,.45); font-weight: 700; }
-.timeCell.inProgress{ color: var(--warn); }
 
 .actionBtn{
   width: 100%;

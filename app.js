@@ -27,14 +27,6 @@
     employeeList: $("employeeList"),
     listSub: $("listSub"),
 
-    summarySub: $("summarySub"),
-    summaryTotal: $("summaryTotal"),
-    summaryInside: $("summaryInside"),
-    summaryOnShift: $("summaryOnShift"),
-    summaryNoShift: $("summaryNoShift"),
-    summaryCompleted: $("summaryCompleted"),
-    summaryHours: $("summaryHours"),
-
     events: $("events"),
 
     btnExportDay: $("btnExportDay"),
@@ -102,14 +94,6 @@
   function fmtFull(ms) {
     const d = new Date(ms);
     return `${toDateInputValue(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-  }
-
-  function fmtDuration(ms) {
-    if (!ms || ms <= 0) return "—";
-    const totalMinutes = Math.floor(ms / 60000);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return `${hours}h ${pad2(minutes)}m`;
   }
 
   function weekdayIndex(dateObj) {
@@ -348,7 +332,6 @@
           <div class="shiftCell"><div class="shiftMain">—</div></div>
           <div class="timeCell muted">—</div>
           <div class="timeCell muted">—</div>
-          <div class="timeCell muted">—</div>
           <div class="actionCell"></div>
         </div>
       `;
@@ -364,12 +347,6 @@
 
       const inTxt = rec.inTs ? fmtTime(rec.inTs) : "—";
       const outTxt = rec.outTs ? fmtTime(rec.outTs) : "—";
-      const durationMs = rec.inTs && rec.outTs
-        ? Math.max(0, rec.outTs - rec.inTs)
-        : (rec.inTs && isToday ? Math.max(0, now.getTime() - rec.inTs) : 0);
-      const durationTxt = rec.inTs
-        ? fmtDuration(durationMs)
-        : "—";
 
       const inside = !!rec.inTs && !rec.outTs;
       const shiftTxt = shift ? `${shift.start}–${shift.end}` : "Sin turno";
@@ -406,7 +383,6 @@
 
           <div class="timeCell ${rec.inTs ? "" : "muted"}">${escapeHtml(inTxt)}</div>
           <div class="timeCell ${rec.outTs ? "" : "muted"}">${escapeHtml(outTxt)}</div>
-          <div class="timeCell ${inside ? "inProgress" : (rec.inTs ? "" : "muted")}">${escapeHtml(durationTxt)}</div>
 
           <div class="actionCell">
             <button class="btn actionBtn ${btnClass}" type="button" data-action="punch" data-emp="${emp.id}">
@@ -861,7 +837,6 @@
   function renderAll() {
     renderHeader();
     renderDateControls();
-    renderSummary();
     renderList();
     renderEvents();
   }
