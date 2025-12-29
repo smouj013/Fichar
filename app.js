@@ -1,6 +1,18 @@
-/* app.js — ClockIn v2.0.0 (STABLE + PWA + AUTO-UPDATE + UI PRO) */
+/* app.js — ClockIn v2.0.0 (STABLE + PWA + AUTO-UPDATE + UI PRO + ANIM)
+   ✅ Reforzado:
+   - Guard anti doble carga
+   - Modal con animación (class is-open) + cierre suave
+   - Transiciones entre vistas/tabs (enter/exit)
+   - Toasts: dismiss por click + animación sin “saltos”
+   - Inyección opcional de background .bg-glow (si no existe en index)
+*/
 (() => {
   "use strict";
+
+  // ───────────────────────── Guard anti doble carga ─────────────────────────
+  const g = (typeof globalThis !== "undefined") ? globalThis : window;
+  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V2000";
+  try { if (g && g[LOAD_GUARD]) return; if (g) g[LOAD_GUARD] = true; } catch (_) {}
 
   const VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.0.0");
 
@@ -15,6 +27,11 @@
   const SW_RELOAD_GUARD = "clockin_sw_reload_once";
 
   const CR = (typeof globalThis !== "undefined" && globalThis.crypto) ? globalThis.crypto : null;
+
+  const prefersReducedMotion = (() => {
+    try { return !!window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+    catch (_) { return false; }
+  })();
 
   // ───────────────────────── Helpers ─────────────────────────
   function $(sel, root){ return (root || document).querySelector(sel); }
@@ -80,6 +97,7 @@
 
   // ───────────────────────── Splash / Fatal ─────────────────────────
   const ui = {};
+
   function setSplash(msg){
     if (!ui.splashMsg) return;
     if (msg) ui.splashMsg.textContent = msg;
@@ -90,11 +108,16 @@
     ui.splash.classList.add("is-hidden");
     setTimeout(() => {
       try { ui.splash.remove(); } catch(_) { ui.splash.style.display = "none"; }
-    }, 320);
+    }, prefersReducedMotion ? 0 : 320);
   }
 
   function hardCloseOverlays(){
-    try { if (ui.modalBackdrop) ui.modalBackdrop.hidden = true; } catch(_) {}
+    try {
+      if (ui.modalBackdrop) {
+        ui.modalBackdrop.classList.remove("is-open");
+        ui.modalBackdrop.hidden = true;
+      }
+    } catch(_) {}
     try { document.body.classList.remove("modal-open"); } catch(_) {}
     try {
       const splash = ui.splash || $("#splash");
@@ -320,6 +343,7 @@
 
     const el = document.createElement("div");
     el.className = "toast";
+    el.setAttribute("role", "status");
     el.innerHTML = `
       <div class="ticon">${escapeHtml(icon || "ℹ️")}</div>
       <div>
@@ -327,10 +351,20 @@
         ${sub ? `<div class="tsub">${escapeHtml(sub)}</div>` : ""}
       </div>
     `;
+
+    // click-to-dismiss (pro)
+    el.addEventListener("click", () => {
+      try { el.style.opacity = "0"; el.style.transform = "translateY(6px)"; } catch(_) {}
+      setTimeout(() => { try { el.remove(); } catch(_) {} }, prefersReducedMotion ? 0 : 240);
+    });
+
     zone.appendChild(el);
 
-    setTimeout(()=>{ el.style.opacity="0"; el.style.transform="translateY(6px)"; }, 2600);
-    setTimeout(()=>{ try{ el.remove(); }catch(_){ } }, 3200);
+    const t1 = prefersReducedMotion ? 800 : 2600;
+    const t2 = prefersReducedMotion ? 900 : 3200;
+
+    setTimeout(()=>{ try { el.style.opacity="0"; el.style.transform="translateY(6px)"; } catch(_) {} }, t1);
+    setTimeout(()=>{ try{ el.remove(); }catch(_){ } }, t2);
   }
 
   function openModal(title, bodyNode, actions){
@@ -347,6 +381,13 @@
     mb.hidden = false;
     document.body.classList.add("modal-open");
 
+    // ✅ animación (CSS: .modal-backdrop.is-open .modal)
+    if (!prefersReducedMotion){
+      requestAnimationFrame(()=> mb.classList.add("is-open"));
+    } else {
+      mb.classList.add("is-open");
+    }
+
     setTimeout(()=>{
       const focusable = mb.querySelector("input, textarea, select, button");
       if (focusable) focusable.focus();
@@ -356,12 +397,18 @@
   function closeModal(){
     const mb = ui.modalBackdrop;
     if (!mb) return;
-    mb.hidden = true;
+
+    mb.classList.remove("is-open");
     document.body.classList.remove("modal-open");
-    try{
-      ui.modalBody.innerHTML = "";
-      ui.modalActions.innerHTML = "";
-    }catch(_){}
+
+    const hideDelay = prefersReducedMotion ? 0 : 180;
+    setTimeout(()=>{
+      mb.hidden = true;
+      try{
+        ui.modalBody.innerHTML = "";
+        ui.modalActions.innerHTML = "";
+      }catch(_){}
+    }, hideDelay);
   }
 
   function mkBtn(label, cls, onClick){
@@ -549,7 +596,6 @@
     const dayKey = dateKeyLocal(now());
     const cur = computeDay(empId, dayKey);
 
-    // mensaje específico para evitar confusión
     if (type === "OUT" && cur.phase === "BREAK"){
       toast("⚠️","No puedes salir en pausa","Termina la pausa antes de fichar salida.");
       return;
@@ -926,9 +972,54 @@
     summaryDayKey: dateKeyLocal(now())
   };
 
+  const ROUTE_ANIM_MS = prefersReducedMotion ? 0 : 200;
+  let currentRoute = "panel";
+
   function setRoute(route){
-    $$(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.route===route));
-    $$(".view").forEach(v => v.hidden = (v.dataset.route!==route));
+    route = String(route || "panel");
+    if (route === currentRoute) return;
+
+    const from = currentRoute;
+    currentRoute = route;
+
+    // Tabs UI
+    $$(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.route === route));
+
+    const fromView = $(`.view[data-route="${from}"]`);
+    const toView = $(`.view[data-route="${route}"]`);
+    if (!toView) { renderAll(); return; }
+
+    // Preparar entrada
+    toView.hidden = false;
+    toView.classList.remove("view-exit","is-exiting");
+    toView.classList.add("view-enter");
+
+    // Preparar salida
+    if (fromView && !fromView.hidden){
+      fromView.classList.remove("view-enter","is-entering");
+      fromView.classList.add("view-exit");
+    }
+
+    // Disparar animaciones
+    if (!prefersReducedMotion){
+      requestAnimationFrame(()=>{
+        toView.classList.add("is-entering");
+        if (fromView) fromView.classList.add("is-exiting");
+      });
+    } else {
+      toView.classList.add("is-entering");
+      if (fromView) fromView.classList.add("is-exiting");
+    }
+
+    // Cleanup + ocultar antigua
+    setTimeout(()=>{
+      if (fromView){
+        fromView.hidden = true;
+        fromView.classList.remove("view-exit","is-exiting");
+      }
+      toView.classList.remove("view-enter","is-entering");
+    }, ROUTE_ANIM_MS);
+
     renderAll();
   }
 
@@ -986,7 +1077,6 @@
       btnClock.addEventListener("click", async ()=>{
         const cur = computeDay(emp.id, dayKey);
 
-        // mensaje específico antes de validar
         if (cur.phase === "BREAK"){
           toast("⚠️","No puedes salir en pausa","Termina la pausa antes de fichar salida.");
           return;
@@ -1204,7 +1294,7 @@
     ui.uiDate.textContent = prettyDateLong(now());
     ui.uiOffline.hidden = navigator.onLine;
 
-    const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
+    const active = currentRoute || ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
     if (active==="panel") renderPanel();
     if (active==="resumen") renderResumen();
     if (active==="historial") renderHistorial();
@@ -1368,9 +1458,22 @@
     });
   }
 
+  // ───────────────────────── UI extras ─────────────────────────
+  function ensureBackgroundGlow(){
+    // si no existe en index, lo inyecta (no rompe nada)
+    try{
+      if ($(".bg-glow")) return;
+      const el = document.createElement("div");
+      el.className = "bg-glow";
+      document.body.appendChild(el);
+    }catch(_){}
+  }
+
   // ───────────────────────── DOM Ready ─────────────────────────
   document.addEventListener("DOMContentLoaded", () => {
     try {
+      ensureBackgroundGlow();
+
       // refs splash
       ui.splash = $("#splash");
       ui.splashMsg = $("#splashMsg");
@@ -1471,6 +1574,11 @@
       // tabs
       $$(".tab").forEach(btn => btn.addEventListener("click", ()=>setRoute(btn.dataset.route)));
 
+      // route inicial (si el HTML marca un tab activo, lo respeta)
+      currentRoute = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
+      // asegurar visibilidad correcta de vistas en boot (por si el HTML viene mal)
+      $$(".view").forEach(v => v.hidden = (v.dataset.route !== currentRoute));
+
       // add employee
       const openAdd = ()=>addOrEditEmployeeFlow(null);
       ui.btnQuickAdd.addEventListener("click", openAdd);
@@ -1542,12 +1650,11 @@
 
       // refresco suave (panel/resumen)
       setInterval(()=>{
-        const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
-        if (active==="panel" || active==="resumen") renderAll();
+        if (currentRoute==="panel" || currentRoute==="resumen") renderAll();
       }, 15000);
 
       // done
-      setTimeout(()=>hideSplash(), 250);
+      setTimeout(()=>hideSplash(), prefersReducedMotion ? 0 : 250);
 
     } catch (e) {
       console.error(e);
