@@ -24,8 +24,22 @@
     dateHint: $("dateHint"),
 
     searchInput: $("searchInput"),
+    btnClearSearch: $("btnClearSearch"),
     employeeList: $("employeeList"),
     listSub: $("listSub"),
+
+    summarySub: $("summarySub"),
+    summaryTotal: $("summaryTotal"),
+    summaryInside: $("summaryInside"),
+    summaryOnShift: $("summaryOnShift"),
+    summaryNoShift: $("summaryNoShift"),
+    summaryCompleted: $("summaryCompleted"),
+    summaryHours: $("summaryHours"),
+    filterAllCount: $("filterAllCount"),
+    filterInsideCount: $("filterInsideCount"),
+    filterOnShiftCount: $("filterOnShiftCount"),
+    filterNoShiftCount: $("filterNoShiftCount"),
+    filterCompletedCount: $("filterCompletedCount"),
 
     events: $("events"),
 
@@ -94,6 +108,14 @@
   function fmtFull(ms) {
     const d = new Date(ms);
     return `${toDateInputValue(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+
+  function fmtDuration(ms) {
+    if (!ms || ms <= 0) return "—";
+    const totalMinutes = Math.floor(ms / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${pad2(minutes)}m`;
   }
 
   function weekdayIndex(dateObj) {
@@ -185,6 +207,15 @@
     } catch {}
   }
 
+  function scheduleRender() {
+    if (scheduleRender.pending) return;
+    scheduleRender.pending = true;
+    requestAnimationFrame(() => {
+      scheduleRender.pending = false;
+      renderAll();
+    });
+  }
+
   // PIN
   function randomSalt() {
     const arr = new Uint8Array(16);
@@ -231,6 +262,8 @@
   // Current view date
   let viewDate = parseDateInputValue(el.datePicker?.value || toDateInputValue(new Date()));
   let searchQuery = "";
+  let statusFilter = "all";
+  const collator = new Intl.Collator("es", { sensitivity: "base", numeric: true });
 
   function getDateKey(d) {
     return toDateInputValue(d);
@@ -245,6 +278,26 @@
     const day = ensureDayRecord(dateKey);
     if (!day[empId]) day[empId] = { inTs: 0, outTs: 0 };
     return day[empId];
+  }
+
+  function getEmployeeSnapshot(emp, dateObj, now, isToday) {
+    const key = getDateKey(dateObj);
+    const rec = getEmpRecord(key, emp.id);
+    const shift = getShiftForEmployeeOnDate(emp, dateObj);
+    const inside = !!rec.inTs && !rec.outTs;
+    const completed = !!rec.inTs && !!rec.outTs;
+    const onShift = shift && isToday && !rec.inTs && !rec.outTs && isWithinShiftNow(shift, now);
+    const noShift = !shift;
+    return { rec, shift, inside, completed, onShift, noShift };
+  }
+
+  function matchesStatusFilter(snapshot) {
+    if (statusFilter === "all") return true;
+    if (statusFilter === "inside") return snapshot.inside;
+    if (statusFilter === "onShift") return snapshot.onShift;
+    if (statusFilter === "noShift") return snapshot.noShift;
+    if (statusFilter === "completed") return snapshot.completed;
+    return true;
   }
 
   // Schedule
@@ -311,13 +364,28 @@
 
   function renderList() {
     const key = getDateKey(viewDate);
-    const dayRec = ensureDayRecord(key);
+    ensureDayRecord(key);
+
+    const now = new Date();
+    const isToday = (getDateKey(now) === key);
 
     const filtered = state.employees
       .filter(e => e && e.name)
-      .filter(e => e.name.toLowerCase().includes(searchQuery));
+      .filter(e => e.name.toLowerCase().includes(searchQuery))
+      .map(emp => ({ emp, snapshot: getEmployeeSnapshot(emp, viewDate, now, isToday) }))
+      .filter(({ snapshot }) => matchesStatusFilter(snapshot))
+      .sort((a, b) => collator.compare(a.emp.name, b.emp.name));
 
-    el.listSub.textContent = `${filtered.length} empleado(s) · Fecha: ${key}`;
+    const filterLabel = statusFilter === "all"
+      ? "Todos"
+      : statusFilter === "inside"
+        ? "Dentro"
+        : statusFilter === "onShift"
+          ? "En turno"
+          : statusFilter === "noShift"
+            ? "Sin turno"
+            : "Completos";
+    el.listSub.textContent = `${filtered.length} empleado(s) · ${filterLabel} · Fecha: ${key}`;
 
     if (!filtered.length) {
       el.employeeList.innerHTML = `
@@ -332,26 +400,30 @@
           <div class="shiftCell"><div class="shiftMain">—</div></div>
           <div class="timeCell muted">—</div>
           <div class="timeCell muted">—</div>
+          <div class="timeCell muted">—</div>
           <div class="actionCell"></div>
         </div>
       `;
       return;
     }
 
-    const now = new Date();
-    const isToday = (getDateKey(now) === key);
-
-    el.employeeList.innerHTML = filtered.map(emp => {
-      const rec = getEmpRecord(key, emp.id);
-      const shift = getShiftForEmployeeOnDate(emp, viewDate);
+    el.employeeList.innerHTML = filtered.map(({ emp, snapshot }) => {
+      const rec = snapshot.rec;
+      const shift = snapshot.shift;
 
       const inTxt = rec.inTs ? fmtTime(rec.inTs) : "—";
       const outTxt = rec.outTs ? fmtTime(rec.outTs) : "—";
+      const durationMs = rec.inTs && rec.outTs
+        ? Math.max(0, rec.outTs - rec.inTs)
+        : (rec.inTs && isToday ? Math.max(0, now.getTime() - rec.inTs) : 0);
+      const durationTxt = rec.inTs
+        ? fmtDuration(durationMs)
+        : "—";
 
-      const inside = !!rec.inTs && !rec.outTs;
+      const inside = snapshot.inside;
       const shiftTxt = shift ? `${shift.start}–${shift.end}` : "Sin turno";
 
-      const showTurnoBadge = shift && isToday && isWithinShiftNow(shift, now) && !inside && !rec.outTs;
+      const showTurnoBadge = snapshot.onShift && !inside && !rec.outTs;
       const badge = inside
         ? `<span class="chip chip-ok">● Dentro</span>`
         : showTurnoBadge
@@ -383,6 +455,7 @@
 
           <div class="timeCell ${rec.inTs ? "" : "muted"}">${escapeHtml(inTxt)}</div>
           <div class="timeCell ${rec.outTs ? "" : "muted"}">${escapeHtml(outTxt)}</div>
+          <div class="timeCell ${inside ? "inProgress" : (rec.inTs ? "" : "muted")}">${escapeHtml(durationTxt)}</div>
 
           <div class="actionCell">
             <button class="btn actionBtn ${btnClass}" type="button" data-action="punch" data-emp="${emp.id}">
@@ -392,16 +465,50 @@
         </div>
       `;
     }).join("");
+  }
 
-    // Bind clicks (delegación)
-    el.employeeList.querySelectorAll('button[data-action="punch"]').forEach(btn => {
-      btn.addEventListener("click", () => {
-        const empId = btn.getAttribute("data-emp");
-        const emp = state.employees.find(e => e.id === empId);
-        if (!emp) return;
-        handlePunch(emp);
-      });
+  function renderSummary() {
+    const key = getDateKey(viewDate);
+    const now = new Date();
+    const isToday = (getDateKey(now) === key);
+
+    let inside = 0;
+    let onShift = 0;
+    let noShift = 0;
+    let completed = 0;
+    let totalHoursMs = 0;
+
+    state.employees.forEach(emp => {
+      const snapshot = getEmployeeSnapshot(emp, viewDate, now, isToday);
+
+      if (snapshot.noShift) noShift += 1;
+      if (snapshot.inside) inside += 1;
+      if (snapshot.completed) {
+        completed += 1;
+        totalHoursMs += Math.max(0, snapshot.rec.outTs - snapshot.rec.inTs);
+      }
+
+      if (snapshot.onShift) {
+        onShift += 1;
+      }
     });
+
+    const total = state.employees.length;
+    const updateTime = fmtTime(now.getTime());
+
+    el.summarySub.textContent = `Fecha: ${key} · Actualizado ${updateTime}`;
+    el.summaryTotal.textContent = String(total);
+    el.summaryInside.textContent = String(inside);
+    el.summaryOnShift.textContent = String(onShift);
+    el.summaryNoShift.textContent = String(noShift);
+    el.summaryCompleted.textContent = String(completed);
+    el.summaryHours.textContent = fmtDuration(totalHoursMs);
+
+    if (el.filterAllCount) el.filterAllCount.textContent = String(total);
+    if (el.filterInsideCount) el.filterInsideCount.textContent = String(inside);
+    if (el.filterOnShiftCount) el.filterOnShiftCount.textContent = String(onShift);
+    if (el.filterNoShiftCount) el.filterNoShiftCount.textContent = String(noShift);
+    if (el.filterCompletedCount) el.filterCompletedCount.textContent = String(completed);
   }
 
   function renderEvents() {
@@ -467,7 +574,7 @@
     }
 
     saveState();
-    renderAll();
+    scheduleRender();
   }
 
   // Export CSV
@@ -592,7 +699,7 @@
 
     saveState();
     closeSettings();
-    renderAll();
+    scheduleRender();
   }
 
   // Employee admin
@@ -645,7 +752,7 @@
     el.inpNewEmployee.value = "";
     saveState();
     renderEmpAdmin();
-    renderAll();
+    scheduleRender();
   }
 
   function renameEmployee(emp) {
@@ -656,7 +763,7 @@
     emp.name = n;
     saveState();
     renderEmpAdmin();
-    renderAll();
+    scheduleRender();
   }
 
   function removeEmployee(emp) {
@@ -668,7 +775,7 @@
     // No borramos records por seguridad; quedan “huérfanos”
     saveState();
     renderEmpAdmin();
-    renderAll();
+    scheduleRender();
   }
 
   // Edit schedule modal
@@ -751,7 +858,7 @@
     saveState();
     closeEditEmployee();
     renderEmpAdmin();
-    renderAll();
+    scheduleRender();
   }
 
   // Clear day records
@@ -764,7 +871,7 @@
     state.records[key] = {};
     addEvent("RESET", { id: "", name: "Sistema" }, key, { note: "Borrado día completo" });
     saveState();
-    renderAll();
+    scheduleRender();
   }
 
   // PWA install prompt + SW
@@ -794,6 +901,7 @@
   function renderAll() {
     renderHeader();
     renderDateControls();
+    renderSummary();
     renderList();
     renderEvents();
   }
@@ -803,27 +911,32 @@
     // Date
     el.datePicker.addEventListener("change", () => {
       viewDate = parseDateInputValue(el.datePicker.value);
-      renderAll();
+      scheduleRender();
     });
 
     el.btnPrevDay.addEventListener("click", () => {
       viewDate = clampDay(viewDate, -1);
-      renderAll();
+      scheduleRender();
     });
 
     el.btnNextDay.addEventListener("click", () => {
       viewDate = clampDay(viewDate, 1);
-      renderAll();
+      scheduleRender();
     });
 
     el.btnToday.addEventListener("click", () => {
       viewDate = new Date();
-      renderAll();
+      scheduleRender();
     });
 
     // Search
     el.searchInput.addEventListener("input", () => {
       searchQuery = el.searchInput.value.trim().toLowerCase();
+      renderList();
+    });
+    el.btnClearSearch.addEventListener("click", () => {
+      el.searchInput.value = "";
+      searchQuery = "";
       renderList();
     });
 
@@ -855,6 +968,27 @@
 
     el.btnTemplateWeek.addEventListener("click", applyTemplateWeek);
     el.btnClearSchedule.addEventListener("click", clearSchedule);
+
+    el.employeeList.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const button = target.closest('button[data-action="punch"]');
+      if (!button) return;
+      const empId = button.getAttribute("data-emp");
+      const emp = state.employees.find(e => e.id === empId);
+      if (!emp) return;
+      handlePunch(emp);
+    });
+
+    document.querySelectorAll(".filterBtn[data-filter]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        statusFilter = btn.getAttribute("data-filter") || "all";
+        document.querySelectorAll(".filterBtn[data-filter]").forEach(b => {
+          b.classList.toggle("active", b.getAttribute("data-filter") === statusFilter);
+        });
+        renderList();
+      });
+    });
 
     // Esc
     window.addEventListener("keydown", (e) => {

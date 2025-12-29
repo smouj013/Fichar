@@ -55,8 +55,70 @@
 
           <div class="searchBox">
             <div class="label">Buscar</div>
-            <input class="input" id="searchInput" placeholder="Filtrar por nombre…" maxlength="40" />
+            <div class="searchRow">
+              <input class="input" id="searchInput" placeholder="Filtrar por nombre…" maxlength="40" />
+              <button class="btn ghost" id="btnClearSearch" type="button" title="Limpiar búsqueda">✕</button>
+            </div>
             <div class="hint">Tip: escribe “ana”, “carlos”…</div>
+            <div class="filterGroup" role="group" aria-label="Filtrar por estado">
+              <button class="btn filterBtn active" type="button" data-filter="all">
+                Todos <span class="filterCount" id="filterAllCount">—</span>
+              </button>
+              <button class="btn filterBtn" type="button" data-filter="inside">
+                Dentro <span class="filterCount" id="filterInsideCount">—</span>
+              </button>
+              <button class="btn filterBtn" type="button" data-filter="onShift">
+                En turno <span class="filterCount" id="filterOnShiftCount">—</span>
+              </button>
+              <button class="btn filterBtn" type="button" data-filter="noShift">
+                Sin turno <span class="filterCount" id="filterNoShiftCount">—</span>
+              </button>
+              <button class="btn filterBtn" type="button" data-filter="completed">
+                Completos <span class="filterCount" id="filterCompletedCount">—</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card summaryCard">
+        <div class="cardHead">
+          <div>
+            <div class="cardTitle">Resumen del día</div>
+            <div class="cardSub" id="summarySub">—</div>
+          </div>
+          <div class="summaryHint">Actualización en tiempo real</div>
+        </div>
+        <div class="summaryGrid">
+          <div class="summaryItem accent-primary">
+            <div class="summaryLabel">Empleados</div>
+            <div class="summaryValue" id="summaryTotal">—</div>
+            <div class="summaryMeta">Activos hoy</div>
+          </div>
+          <div class="summaryItem accent-ok">
+            <div class="summaryLabel">Dentro</div>
+            <div class="summaryValue" id="summaryInside">—</div>
+            <div class="summaryMeta">En la oficina</div>
+          </div>
+          <div class="summaryItem accent-warn">
+            <div class="summaryLabel">En turno</div>
+            <div class="summaryValue" id="summaryOnShift">—</div>
+            <div class="summaryMeta">Sin fichar</div>
+          </div>
+          <div class="summaryItem accent-muted">
+            <div class="summaryLabel">Sin turno</div>
+            <div class="summaryValue" id="summaryNoShift">—</div>
+            <div class="summaryMeta">Sin horario</div>
+          </div>
+          <div class="summaryItem accent-info">
+            <div class="summaryLabel">Fichajes completos</div>
+            <div class="summaryValue" id="summaryCompleted">—</div>
+            <div class="summaryMeta">Entrada y salida</div>
+          </div>
+          <div class="summaryItem accent-primary">
+            <div class="summaryLabel">Horas registradas</div>
+            <div class="summaryValue" id="summaryHours">—</div>
+            <div class="summaryMeta">Total del día</div>
           </div>
         </div>
       </section>
@@ -81,6 +143,7 @@
             <div>Turno de hoy</div>
             <div>Entrada</div>
             <div>Salida</div>
+            <div>Horas</div>
             <div>Acción</div>
           </div>
 
