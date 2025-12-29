@@ -1,4 +1,4 @@
-/* app.js — ClockIn v2.0.0 (ESTABLE + PWA + AUTO-UPDATE + UI PRO) */
+/* app.js — ClockIn v2.0.0 (STABLE + PWA + AUTO-UPDATE + UI PRO) */
 (() => {
   "use strict";
 
@@ -12,11 +12,13 @@
   const DOW_LABEL = { mon:"Lun", tue:"Mar", wed:"Mié", thu:"Jue", fri:"Vie", sat:"Sáb", sun:"Dom" };
 
   const MAX_EVENTS_STEP = 300;
+  const SW_RELOAD_GUARD = "clockin_sw_reload_once";
 
   const CR = (typeof globalThis !== "undefined" && globalThis.crypto) ? globalThis.crypto : null;
 
-  function $(sel, root=document){ return root.querySelector(sel); }
-  function $$(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+  // ───────────────────────── Helpers ─────────────────────────
+  function $(sel, root){ return (root || document).querySelector(sel); }
+  function $$(sel, root){ return Array.from((root || document).querySelectorAll(sel)); }
   function pad2(n){ return String(n).padStart(2,"0"); }
 
   function safeReplaceAll(s, a, b) {
@@ -26,7 +28,7 @@
   }
 
   function escapeHtml(s){
-    s = String(s ?? "");
+    s = String(s == null ? "" : s);
     s = safeReplaceAll(s, "&", "&amp;");
     s = safeReplaceAll(s, "<", "&lt;");
     s = safeReplaceAll(s, ">", "&gt;");
@@ -48,7 +50,7 @@
   }
 
   function dowKeyFromDateKey(dayKey){
-    // dayKey: YYYY-MM-DD
+    // YYYY-MM-DD -> evita UTC raro en iOS usando mediodía
     const d = new Date(dayKey + "T12:00:00");
     return DOW_KEYS[d.getDay()];
   }
@@ -59,8 +61,13 @@
   }
 
   function prettyDateLong(ms){
-    try { return new Intl.DateTimeFormat("es-ES",{weekday:"long",year:"numeric",month:"long",day:"numeric"}).format(new Date(ms)); }
-    catch(_) { return dateKeyLocal(ms); }
+    try {
+      return new Intl.DateTimeFormat("es-ES",{
+        weekday:"long",year:"numeric",month:"long",day:"numeric"
+      }).format(new Date(ms));
+    } catch(_) {
+      return dateKeyLocal(ms);
+    }
   }
 
   function fmtDuration(ms){
@@ -71,37 +78,26 @@
     return h<=0 ? `${mm} min` : `${h} h ${mm} min`;
   }
 
-  function vibrate(ms){
-    try{
-      if (!state?.settings?.haptics) return;
-      if (navigator.vibrate) navigator.vibrate(ms);
-    }catch(_){}
-  }
-
+  // ───────────────────────── Splash / Fatal ─────────────────────────
+  const ui = {};
   function setSplash(msg){
-    const splash = $("#splash");
-    if (!splash) return;
-    const m = $("#splashMsg");
-    if (m && msg) m.textContent = msg;
+    if (!ui.splashMsg) return;
+    if (msg) ui.splashMsg.textContent = msg;
   }
 
   function hideSplash(){
-    const splash = $("#splash");
-    if (!splash) return;
-    splash.style.opacity = "0";
-    splash.style.pointerEvents = "none";
-    setTimeout(()=>{ splash.remove(); }, 380);
+    if (!ui.splash) return;
+    ui.splash.classList.add("is-hidden");
+    setTimeout(() => {
+      try { ui.splash.remove(); } catch(_) { ui.splash.style.display = "none"; }
+    }, 320);
   }
 
   function hardCloseOverlays(){
-    // Nunca dejar el modal/splash “encima” pillado
-    try {
-      const mb = $("#modalBackdrop");
-      if (mb) mb.hidden = true;
-    } catch(_) {}
+    try { if (ui.modalBackdrop) ui.modalBackdrop.hidden = true; } catch(_) {}
     try { document.body.classList.remove("modal-open"); } catch(_) {}
     try {
-      const splash = $("#splash");
+      const splash = ui.splash || $("#splash");
       if (splash) splash.style.display = "none";
     } catch(_) {}
   }
@@ -109,7 +105,7 @@
   function fatalScreen(title, details){
     hardCloseOverlays();
 
-    const main = $("#appMain") || $(".main");
+    const main = ui.appMain || $("#appMain") || $(".main");
     if (!main) { alert(title + "\n\n" + details); return; }
 
     main.innerHTML = `
@@ -118,7 +114,7 @@
         <div class="muted small" style="white-space:pre-wrap; margin-top:8px">${escapeHtml(details)}</div>
         <div class="row" style="margin-top:12px">
           <a class="btn btn-ghost" href="./?repair"><span class="ms">construction</span> Repair</a>
-          <button class="btn btn-primary" id="btnReload"><span class="ms">refresh</span> Recargar</button>
+          <button class="btn btn-primary" id="btnReload" type="button"><span class="ms">refresh</span> Recargar</button>
         </div>
       </div>
     `;
@@ -126,7 +122,7 @@
     if (r) r.addEventListener("click", () => location.reload());
   }
 
-  // ───────────────────────── Default state ─────────────────────────
+  // ───────────────────────── State ─────────────────────────
   function makeDefaultSchedule(){
     const base = { off:false, start:"09:00", end:"17:00" };
     return {
@@ -140,7 +136,7 @@
     const def = makeDefaultSchedule();
     const out = {};
     for (const k of Object.keys(def)){
-      const v = sch && sch[k] ? sch[k] : def[k];
+      const v = (sch && sch[k]) ? sch[k] : def[k];
       out[k] = { off: !!v.off, start: v.start ? String(v.start) : "", end: v.end ? String(v.end) : "" };
     }
     return out;
@@ -191,7 +187,7 @@
         id:String(e.id),
         name:String(e.name),
         schedule: normalizeSchedule(e.schedule),
-        createdAt: Number(e.createdAt||now())
+        createdAt: Number(e.createdAt || now())
       }));
     if (!st.employees.length) st.employees = base.employees;
 
@@ -204,7 +200,7 @@
         type:String(ev.type),
         ts:Number(ev.ts),
         note: ev.note ? String(ev.note) : "",
-        loc: ev.loc && typeof ev.loc === "object" ? { lat:Number(ev.loc.lat), lon:Number(ev.loc.lon) } : null,
+        loc: (ev.loc && typeof ev.loc === "object") ? { lat:Number(ev.loc.lat), lon:Number(ev.loc.lon) } : null,
         hash: ev.hash ? String(ev.hash) : ""
       }));
 
@@ -222,11 +218,9 @@
   }
 
   function loadState(){
-    // 1) v2
     const cur = loadFromKey(STORAGE_KEY);
     if (cur) return normalizeState(cur);
 
-    // 2) migrate v1
     for (const k of LEGACY_KEYS){
       const legacy = loadFromKey(k);
       if (legacy) {
@@ -236,7 +230,6 @@
       }
     }
 
-    // 3) default
     return makeDefaultState();
   }
 
@@ -244,13 +237,21 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       return true;
-    } catch (e) {
+    } catch (_) {
       toast("⛔", "No se pudo guardar", "Almacenamiento bloqueado (modo privado/permisos).");
       return false;
     }
   }
 
   let state = null;
+
+  // ───────────────────────── Haptics ─────────────────────────
+  function vibrate(ms){
+    try{
+      if (!state || !state.settings || !state.settings.haptics) return;
+      if (navigator.vibrate) navigator.vibrate(ms);
+    }catch(_){}
+  }
 
   // ───────────────────────── Crypto (PIN + Hash) ─────────────────────────
   function b64FromBuf(buf){
@@ -314,44 +315,38 @@
 
   // ───────────────────────── UI: Toast + Modal ─────────────────────────
   function toast(icon, msg, sub){
-    const zone = $("#toasts");
+    const zone = ui.toasts || $("#toasts");
     if (!zone) return;
+
     const el = document.createElement("div");
     el.className = "toast";
     el.innerHTML = `
-      <div class="ticon">${escapeHtml(icon||"ℹ️")}</div>
+      <div class="ticon">${escapeHtml(icon || "ℹ️")}</div>
       <div>
         <div class="tmsg">${escapeHtml(msg)}</div>
         ${sub ? `<div class="tsub">${escapeHtml(sub)}</div>` : ""}
       </div>
     `;
     zone.appendChild(el);
+
     setTimeout(()=>{ el.style.opacity="0"; el.style.transform="translateY(6px)"; }, 2600);
-    setTimeout(()=>{ el.remove(); }, 3200);
+    setTimeout(()=>{ try{ el.remove(); }catch(_){ } }, 3200);
   }
 
-  const ui = {};
-  const renderState = {
-    historyLimit: MAX_EVENTS_STEP,
-    historyLastRows: [],
-    summaryDayKey: dateKeyLocal(now())
-  };
-
-  function modalBackdrop(){ return ui.modalBackdrop || $("#modalBackdrop"); }
   function openModal(title, bodyNode, actions){
-    const mb = modalBackdrop();
+    const mb = ui.modalBackdrop;
     if (!mb) return;
 
     ui.modalTitle.textContent = title || "—";
     ui.modalBody.innerHTML = "";
     ui.modalBody.appendChild(bodyNode);
+
     ui.modalActions.innerHTML = "";
-    (actions||[]).forEach(a => ui.modalActions.appendChild(a));
+    (actions || []).forEach(a => ui.modalActions.appendChild(a));
 
     mb.hidden = false;
     document.body.classList.add("modal-open");
 
-    // Focus razonable
     setTimeout(()=>{
       const focusable = mb.querySelector("input, textarea, select, button");
       if (focusable) focusable.focus();
@@ -359,11 +354,10 @@
   }
 
   function closeModal(){
-    const mb = modalBackdrop();
+    const mb = ui.modalBackdrop;
     if (!mb) return;
     mb.hidden = true;
     document.body.classList.remove("modal-open");
-    // limpiar contenido (evita “overlay fantasma”)
     try{
       ui.modalBody.innerHTML = "";
       ui.modalActions.innerHTML = "";
@@ -380,25 +374,19 @@
   }
 
   function initialsFromName(name){
-    const parts = String(name||"").trim().split(/\s+/).filter(Boolean);
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
     if (!parts.length) return "??";
     const a = parts[0][0] || "?";
-    const b = parts.length>1 ? (parts[parts.length-1][0]||"") : (parts[0][1]||"");
-    return (a+b).toUpperCase();
+    const b = parts.length>1 ? (parts[parts.length-1][0] || "") : (parts[0][1] || "");
+    return (a + b).toUpperCase();
   }
 
-  // Cierre garantizado: ESC + click fuera
   function initModalGuards(){
-    const mb = modalBackdrop();
+    const mb = ui.modalBackdrop;
     if (!mb) return;
 
-    mb.addEventListener("click", (e)=>{
-      if (e.target === mb) closeModal();
-    });
-
-    window.addEventListener("keydown", (e)=>{
-      if (e.key === "Escape" && !mb.hidden) closeModal();
-    });
+    mb.addEventListener("click", (e)=>{ if (e.target === mb) closeModal(); });
+    window.addEventListener("keydown", (e)=>{ if (e.key === "Escape" && !mb.hidden) closeModal(); });
   }
 
   // ───────────────────────── Theme ─────────────────────────
@@ -418,7 +406,9 @@
     try{
       themeMedia.addEventListener("change", ()=>{ if (state.settings.theme==="system") applyTheme(); });
     }catch(_){
-      try{ themeMedia.addListener(()=>{ if (state.settings.theme==="system") applyTheme(); }); }catch(__){}
+      try{
+        themeMedia.addListener(()=>{ if (state.settings.theme==="system") applyTheme(); });
+      }catch(__){}
     }
   }
 
@@ -441,7 +431,6 @@
     for (const ev of evs){
       if (ev.type==="IN"){
         if (!firstIn) firstIn=ev.ts;
-        // si hay IN repetido, reinicia tramo
         workStart = ev.ts;
         breakStart = null;
       } else if (ev.type==="BREAK_START"){
@@ -511,19 +500,10 @@
   }
 
   function validateNextAction(curPhase, actionType){
-    // Reglas para que no se rompa el flujo
-    if (actionType==="IN"){
-      return (curPhase==="OUT" || curPhase==="DONE");
-    }
-    if (actionType==="OUT"){
-      return (curPhase==="IN");
-    }
-    if (actionType==="BREAK_START"){
-      return (curPhase==="IN");
-    }
-    if (actionType==="BREAK_END"){
-      return (curPhase==="BREAK");
-    }
+    if (actionType==="IN") return (curPhase==="OUT" || curPhase==="DONE");
+    if (actionType==="OUT") return (curPhase==="IN");
+    if (actionType==="BREAK_START") return (curPhase==="IN");
+    if (actionType==="BREAK_END") return (curPhase==="BREAK");
     return false;
   }
 
@@ -544,10 +524,10 @@
 
     const bCancel = mkBtn(`Cancelar`, "btn btn-ghost", ()=>closeModal());
     const bNo = mkBtn(`Guardar sin nota`, "btn btn-ghost", ()=>{ closeModal(); onOk(""); });
-    const bOk = mkBtn(`<span class="ms">done</span> Guardar`, "btn btn-primary", ()=>{ closeModal(); onOk(ta.value||""); });
+    const bOk = mkBtn(`<span class="ms">done</span> Guardar`, "btn btn-primary", ()=>{ closeModal(); onOk(ta.value || ""); });
 
-    openModal(title, wrap, [bCancel,bNo,bOk]);
-    setTimeout(()=>ta && ta.focus(),0);
+    openModal(title, wrap, [bCancel, bNo, bOk]);
+    setTimeout(()=>{ try{ ta.focus(); }catch(_){} }, 0);
   }
 
   async function confirmIfNeeded(title, text){
@@ -555,10 +535,10 @@
 
     return new Promise((resolve)=>{
       const wrap = document.createElement("div");
-      wrap.innerHTML = `<div class="muted">${escapeHtml(text||"¿Confirmas la acción?")}</div>`;
+      wrap.innerHTML = `<div class="muted">${escapeHtml(text || "¿Confirmas la acción?")}</div>`;
       const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>{ closeModal(); resolve(false); });
       const bOk = mkBtn(`<span class="ms">check</span> Confirmar`,"btn btn-primary", ()=>{ closeModal(); resolve(true); });
-      openModal(title, wrap, [bCancel,bOk]);
+      openModal(title, wrap, [bCancel, bOk]);
     });
   }
 
@@ -568,6 +548,12 @@
 
     const dayKey = dateKeyLocal(now());
     const cur = computeDay(empId, dayKey);
+
+    // mensaje específico para evitar confusión
+    if (type === "OUT" && cur.phase === "BREAK"){
+      toast("⚠️","No puedes salir en pausa","Termina la pausa antes de fichar salida.");
+      return;
+    }
 
     if (!validateNextAction(cur.phase, type)){
       toast("⚠️", "Acción no válida", `Estado actual: ${cur.status}`);
@@ -616,20 +602,20 @@
       wrap.innerHTML = `
         <span>Introduce el PIN</span>
         <input id="mPin" type="password" inputmode="numeric" placeholder="PIN" />
-        <div class="small muted">${escapeHtml(reasonText||"Acción protegida")}</div>
+        <div class="small muted">${escapeHtml(reasonText || "Acción protegida")}</div>
       `;
       const pin = $("#mPin", wrap);
 
       const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>{ closeModal(); resolve(false); });
       const bOk = mkBtn(`<span class="ms">lock</span> Verificar`,"btn btn-primary", async ()=>{
-        const ok = await verifyPin(pin.value||"");
+        const ok = await verifyPin(pin.value || "");
         if (!ok) { toast("⛔","PIN incorrecto"); return; }
         closeModal();
         resolve(true);
       });
 
-      openModal("Seguridad", wrap, [bCancel,bOk]);
-      setTimeout(()=>pin && pin.focus(),0);
+      openModal("Seguridad", wrap, [bCancel, bOk]);
+      setTimeout(()=>{ try{ pin.focus(); }catch(_){} }, 0);
     });
   }
 
@@ -653,8 +639,8 @@
 
     const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
     const bOk = mkBtn(`<span class="ms">save</span> Guardar`,"btn btn-primary", async ()=>{
-      const a = (p1.value||"").trim();
-      const b = (p2.value||"").trim();
+      const a = (p1.value || "").trim();
+      const b = (p2.value || "").trim();
       if (a.length<4) { toast("⚠️","PIN demasiado corto","Mínimo 4 dígitos"); return; }
       if (a!==b) { toast("⚠️","No coincide el PIN"); return; }
 
@@ -675,7 +661,7 @@
     });
 
     openModal("Configurar PIN", wrap, [bCancel,bOk]);
-    setTimeout(()=>p1 && p1.focus(),0);
+    setTimeout(()=>{ try{ p1.focus(); }catch(_){} }, 0);
   }
 
   async function clearPinFlow(){
@@ -779,7 +765,7 @@
 
     const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
     const bSave = mkBtn(`<span class="ms">save</span> ${isEdit ? "Guardar" : "Crear"}`,"btn btn-primary", ()=>{
-      const name = (nameInput.value||"").trim();
+      const name = (nameInput.value || "").trim();
       if (name.length<2) { toast("⚠️","Nombre demasiado corto"); return; }
 
       const schedule = schNode.getSchedule();
@@ -796,7 +782,7 @@
     });
 
     openModal(isEdit ? "Editar empleado" : "Añadir empleado", wrap, [bCancel,bSave]);
-    setTimeout(()=>nameInput && nameInput.focus(),0);
+    setTimeout(()=>{ try{ nameInput.focus(); }catch(_){} },0);
   }
 
   async function deleteEmployeeFlow(empId){
@@ -836,7 +822,7 @@
   }
 
   function csvEscape(v){
-    const s = String(v ?? "");
+    const s = String(v == null ? "" : v);
     if (/[",\n]/.test(s)) return `"${safeReplaceAll(s, '"', '""')}"`;
     return s;
   }
@@ -934,6 +920,12 @@
   }
 
   // ───────────────────────── Rendering / Routing ─────────────────────────
+  const renderState = {
+    historyLimit: MAX_EVENTS_STEP,
+    historyLastRows: [],
+    summaryDayKey: dateKeyLocal(now())
+  };
+
   function setRoute(route){
     $$(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.route===route));
     $$(".view").forEach(v => v.hidden = (v.dataset.route!==route));
@@ -942,6 +934,7 @@
 
   function renderPanel(){
     ui.employeeList.innerHTML = "";
+
     const dayKey = dateKeyLocal(now());
     const dowKey = dowKeyFromDateKey(dayKey);
 
@@ -951,11 +944,17 @@
 
     for (const emp of state.employees){
       const d = computeDay(emp.id, dayKey);
+
       const el = document.createElement("div");
       el.className = "emp";
 
+      const pillStateClass =
+        (d.phase==="IN") ? "ok" :
+        (d.phase==="BREAK") ? "warn" :
+        (d.phase==="DONE") ? "off" : "";
+
       const pills = [
-        `<span class="pill ${d.phase==="IN"?"ok":d.phase==="BREAK"?"warn":d.phase==="DONE"?"off":""}">${escapeHtml(d.status)}</span>`,
+        `<span class="pill ${pillStateClass}">${escapeHtml(d.status)}</span>`,
         `<span class="pill">${escapeHtml(scheduleStr(emp, dowKey))}</span>`,
         `<span class="pill">Pausa: ${escapeHtml(fmtDuration(d.breakMs))}</span>`,
         `<span class="pill">Trab.: ${escapeHtml(fmtDuration(d.workMs))}</span>`
@@ -974,29 +973,41 @@
 
       const right = $(".emp-right", el);
 
+      // Entrada/Salida
       const btnClock = document.createElement("button");
+      btnClock.type = "button";
       btnClock.className = "btn btn-primary";
-      btnClock.innerHTML = (d.phase==="OUT" || d.phase==="DONE")
-        ? `<span class="ms">login</span> Entrada`
-        : `<span class="ms">logout</span> Salida`;
+
+      btnClock.innerHTML =
+        (d.phase==="OUT" || d.phase==="DONE")
+          ? `<span class="ms">login</span> Entrada`
+          : `<span class="ms">logout</span> Salida`;
 
       btnClock.addEventListener("click", async ()=>{
         const cur = computeDay(emp.id, dayKey);
+
+        // mensaje específico antes de validar
+        if (cur.phase === "BREAK"){
+          toast("⚠️","No puedes salir en pausa","Termina la pausa antes de fichar salida.");
+          return;
+        }
+
         const type = (cur.phase==="OUT" || cur.phase==="DONE") ? "IN" : "OUT";
+
         if (!validateNextAction(cur.phase, type)){
           toast("⚠️","Acción no válida", `Estado: ${cur.status}`);
           return;
         }
-        if (type==="OUT" && cur.phase==="BREAK"){
-          toast("⚠️","Termina la pausa antes de salir");
-          return;
-        }
+
         const ok = await confirmIfNeeded(`${eventTypeLabel(type)} — ${emp.name}`, `¿Registrar ${eventTypeLabel(type).toLowerCase()} ahora?`);
         if (!ok) return;
+
         askNoteModal(`${eventTypeLabel(type)} — ${emp.name}`, (note)=>addEvent(emp.id, type, note));
       });
 
+      // Pausa
       const btnBreak = document.createElement("button");
+      btnBreak.type = "button";
       btnBreak.className = "btn";
       btnBreak.innerHTML = (d.phase==="BREAK")
         ? `<span class="ms">play_arrow</span> Fin pausa`
@@ -1006,17 +1017,23 @@
       btnBreak.addEventListener("click", async ()=>{
         const cur = computeDay(emp.id, dayKey);
         if (cur.phase==="OUT" || cur.phase==="DONE") return;
+
         const type = (cur.phase==="BREAK") ? "BREAK_END" : "BREAK_START";
+
         if (!validateNextAction(cur.phase, type)){
           toast("⚠️","Acción no válida", `Estado: ${cur.status}`);
           return;
         }
+
         const ok = await confirmIfNeeded(`${eventTypeLabel(type)} — ${emp.name}`, `¿Registrar ${eventTypeLabel(type).toLowerCase()} ahora?`);
         if (!ok) return;
+
         askNoteModal(`${eventTypeLabel(type)} — ${emp.name}`, (note)=>addEvent(emp.id, type, note));
       });
 
+      // Opciones
       const btnMore = document.createElement("button");
+      btnMore.type = "button";
       btnMore.className = "btn btn-ghost";
       btnMore.innerHTML = `<span class="ms">more_vert</span>`;
       btnMore.title = "Opciones";
@@ -1024,13 +1041,13 @@
         const wrap = document.createElement("div");
         wrap.style.display = "grid";
         wrap.style.gap = "10px";
-        wrap.innerHTML = `
-          <div class="muted">Acciones para <b>${escapeHtml(emp.name)}</b></div>
-        `;
+        wrap.innerHTML = `<div class="muted">Acciones para <b>${escapeHtml(emp.name)}</b></div>`;
+
         const bEdit = mkBtn(`<span class="ms">edit</span> Editar empleado`,"btn", ()=>{ closeModal(); addOrEditEmployeeFlow(emp.id); });
         const bDel = mkBtn(`<span class="ms">delete</span> Borrar empleado`,"btn btn-danger", ()=>{ closeModal(); deleteEmployeeFlow(emp.id); });
         const bClose = mkBtn("Cerrar","btn btn-ghost", ()=>closeModal());
-        openModal("Opciones", wrap, [bClose,bEdit,bDel]);
+
+        openModal("Opciones", wrap, [bClose, bEdit, bDel]);
       });
 
       right.appendChild(btnClock);
@@ -1144,7 +1161,6 @@
     ui.uiVer.textContent = VERSION;
 
     ui.tglGeo.checked = !!state.settings.geoEnabled;
-
     ui.optTheme.value = state.settings.theme;
     ui.optAutoUpdate.checked = !!state.settings.autoUpdate;
     ui.optConfirmActions.checked = !!state.settings.confirmActions;
@@ -1157,6 +1173,8 @@
     ui.employeeAdminList.innerHTML = "";
     const frag = document.createDocumentFragment();
 
+    const todayDow = dowKeyFromDateKey(dateKeyLocal(now()));
+
     for (const emp of state.employees){
       const d = document.createElement("div");
       d.className = "emp";
@@ -1166,7 +1184,7 @@
           <div class="emp-meta">
             <div class="emp-name">${escapeHtml(emp.name)}</div>
             <div class="emp-sub">
-              <span class="pill">${escapeHtml(scheduleStr(emp, dowKeyFromDateKey(dateKeyLocal(now()))))}</span>
+              <span class="pill">${escapeHtml(scheduleStr(emp, todayDow))}</span>
               <span class="pill off">ID: <span class="mono">${escapeHtml(emp.id.slice(0,8))}</span></span>
             </div>
           </div>
@@ -1194,12 +1212,9 @@
   }
 
   // ───────────────────────── Service Worker (AUTO-UPDATE sin loops) ─────────────────────────
-  const SW_RELOAD_GUARD = "clockin_sw_reload_once";
-
   async function initSW(){
     if (!("serviceWorker" in navigator)) return;
 
-    // Reload seguro (1 sola vez) cuando cambia el controller
     navigator.serviceWorker.addEventListener("controllerchange", ()=>{
       if (sessionStorage.getItem(SW_RELOAD_GUARD)) return;
       sessionStorage.setItem(SW_RELOAD_GUARD, "1");
@@ -1212,20 +1227,14 @@
       const showUpdate = ()=>{
         ui.btnUpdate.hidden = false;
         if (state.settings.autoUpdate){
-          // auto-aplica si no hay modal abierto
           setTimeout(()=>{
-            const mb = ui.modalBackdrop;
-            if (mb && !mb.hidden) return;
+            if (ui.modalBackdrop && !ui.modalBackdrop.hidden) return;
             applyUpdate(reg);
           }, 700);
         }
       };
 
-      const applyIfWaiting = ()=>{
-        if (reg.waiting) showUpdate();
-      };
-
-      applyIfWaiting();
+      if (reg.waiting) showUpdate();
 
       reg.addEventListener("updatefound", ()=>{
         const inst = reg.installing;
@@ -1239,12 +1248,12 @@
 
       ui.btnUpdate.addEventListener("click", ()=>applyUpdate(reg));
 
-      // Forzar búsqueda de updates de forma suave
       const softUpdate = async ()=>{
         try{
           if (navigator.onLine) await reg.update();
         }catch(_){}
       };
+
       setTimeout(softUpdate, 1200);
       setInterval(softUpdate, 30 * 60 * 1000);
 
@@ -1259,14 +1268,13 @@
     try{
       ui.btnUpdate.disabled = true;
       if (reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
-      // el reload real lo hace controllerchange (y solo 1 vez)
       setTimeout(()=>{ ui.btnUpdate.disabled = false; }, 1500);
     }catch(_){
       ui.btnUpdate.disabled = false;
     }
   }
 
-  // ───────────────────────── Boot ─────────────────────────
+  // ───────────────────────── Boot bindings ─────────────────────────
   function bindOptionHandlers(){
     ui.optTheme.addEventListener("change", ()=>{
       state.settings.theme = ui.optTheme.value;
@@ -1315,10 +1323,10 @@
   }
 
   function bindSummaryDateControls(){
-    const clampDate = (dk)=>{
+    function clampDate(dk){
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return dateKeyLocal(now());
       return dk;
-    };
+    }
 
     ui.sumDate.value = renderState.summaryDayKey;
 
@@ -1360,11 +1368,20 @@
     });
   }
 
+  // ───────────────────────── DOM Ready ─────────────────────────
   document.addEventListener("DOMContentLoaded", () => {
     try {
+      // refs splash
+      ui.splash = $("#splash");
+      ui.splashMsg = $("#splashMsg");
+      ui.splashVer = $("#splashVer");
+      if (ui.splashVer) ui.splashVer.textContent = VERSION;
+
       setSplash("Inicializando…");
 
-      // UI refs
+      // UI refs core
+      ui.appMain = $("#appMain");
+
       ui.uiDate = $("#uiDate");
       ui.uiCounts = $("#uiCounts");
       ui.uiOffline = $("#uiOffline");
@@ -1402,9 +1419,26 @@
       ui.btnSumPrev = $("#btnSumPrev");
       ui.btnSumNext = $("#btnSumNext");
 
-      // Required minimal
+      ui.toasts = $("#toasts");
+
+      // Extra buttons
+      ui.btnExportResumen = $("#btnExportResumen");
+      ui.btnExportEventos = $("#btnExportEventos");
+      ui.btnApplyFilters = $("#btnApplyFilters");
+      ui.btnClearFilters = $("#btnClearFilters");
+      ui.btnBackup = $("#btnBackup");
+      ui.btnRestore = $("#btnRestore");
+      ui.btnWipe = $("#btnWipe");
+      ui.btnSetPin = $("#btnSetPin");
+      ui.btnClearPin = $("#btnClearPin");
+      ui.btnAddEmp = $("#btnAddEmp");
+      ui.btnQuickAdd = $("#btnQuickAdd");
+      ui.fabAdd = $("#fabAdd");
+      ui.filePicker = $("#filePicker");
+      ui.modalClose = $("#modalClose");
+
       const required = [
-        ui.uiDate, ui.uiCounts, ui.uiOffline,
+        ui.uiDate, ui.uiCounts, ui.uiOffline, ui.uiVer,
         ui.employeeList, ui.employeeAdminList,
         ui.summaryBody, ui.eventsBody,
         ui.fEmp, ui.fFrom, ui.fTo,
@@ -1412,13 +1446,18 @@
         ui.tglGeo,
         ui.modalBackdrop, ui.modalTitle, ui.modalBody, ui.modalActions,
         ui.optTheme, ui.optAutoUpdate, ui.optConfirmActions, ui.optNoteMode, ui.optCompact, ui.optHaptics,
-        ui.sumDate, ui.btnSumPrev, ui.btnSumNext
+        ui.sumDate, ui.btnSumPrev, ui.btnSumNext,
+        ui.btnExportResumen, ui.btnExportEventos,
+        ui.btnApplyFilters, ui.btnClearFilters,
+        ui.btnBackup, ui.btnRestore, ui.btnWipe,
+        ui.btnSetPin, ui.btnClearPin,
+        ui.btnAddEmp, ui.btnQuickAdd, ui.fabAdd,
+        ui.filePicker, ui.modalClose
       ];
       if (required.some(x=>!x)) throw new Error("Faltan elementos en index.html (IDs/estructura incorrecta).");
 
-      // Modal close
-      const mClose = $("#modalClose");
-      if (mClose) mClose.addEventListener("click", closeModal);
+      // modal close
+      ui.modalClose.addEventListener("click", closeModal);
       initModalGuards();
 
       // state
@@ -1429,31 +1468,26 @@
       applyTheme();
       hookThemeListener();
 
-      // apply settings UI
-      ui.uiVer.textContent = VERSION;
-
       // tabs
       $$(".tab").forEach(btn => btn.addEventListener("click", ()=>setRoute(btn.dataset.route)));
 
-      // actions
-      const btnQuickAdd = $("#btnQuickAdd");
-      const btnAddEmp = $("#btnAddEmp");
-      const fabAdd = $("#fabAdd");
+      // add employee
       const openAdd = ()=>addOrEditEmployeeFlow(null);
+      ui.btnQuickAdd.addEventListener("click", openAdd);
+      ui.btnAddEmp.addEventListener("click", openAdd);
+      ui.fabAdd.addEventListener("click", openAdd);
 
-      if (btnQuickAdd) btnQuickAdd.addEventListener("click", openAdd);
-      if (btnAddEmp) btnAddEmp.addEventListener("click", openAdd);
-      if (fabAdd) fabAdd.addEventListener("click", openAdd);
+      // export
+      ui.btnExportResumen.addEventListener("click", exportResumenCSV);
+      ui.btnExportEventos.addEventListener("click", ()=>exportEventosCSV(renderState.historyLastRows || null));
 
-      $("#btnExportResumen").addEventListener("click", exportResumenCSV);
-      $("#btnExportEventos").addEventListener("click", ()=>exportEventosCSV(renderState.historyLastRows || null));
-
-      $("#btnApplyFilters").addEventListener("click", ()=>{
+      // filters
+      ui.btnApplyFilters.addEventListener("click", ()=>{
         renderState.historyLimit = MAX_EVENTS_STEP;
         renderHistorial();
       });
 
-      $("#btnClearFilters").addEventListener("click", ()=>{
+      ui.btnClearFilters.addEventListener("click", ()=>{
         ui.fEmp.value = "";
         ui.fFrom.value = "";
         ui.fTo.value = "";
@@ -1466,51 +1500,54 @@
         renderHistorial();
       });
 
-      $("#btnBackup").addEventListener("click", backupJSON);
+      // backup/restore
+      ui.btnBackup.addEventListener("click", backupJSON);
 
-      const filePicker = $("#filePicker");
-      $("#btnRestore").addEventListener("click", async ()=>{
+      ui.btnRestore.addEventListener("click", async ()=>{
         const ok = await requirePinIfSet("Importar backup JSON está protegido por PIN (si está activo).");
         if (!ok) return;
-        filePicker.value = "";
-        filePicker.click();
+        ui.filePicker.value = "";
+        ui.filePicker.click();
       });
-      filePicker.addEventListener("change", ()=>{
-        const file = filePicker.files && filePicker.files[0];
+
+      ui.filePicker.addEventListener("change", ()=>{
+        const file = ui.filePicker.files && ui.filePicker.files[0];
         if (!file) return;
         restoreJSON(file);
       });
 
-      $("#btnWipe").addEventListener("click", wipeAll);
+      // wipe
+      ui.btnWipe.addEventListener("click", wipeAll);
 
-      $("#btnSetPin").addEventListener("click", setPinFlow);
-      $("#btnClearPin").addEventListener("click", clearPinFlow);
+      // pin
+      ui.btnSetPin.addEventListener("click", setPinFlow);
+      ui.btnClearPin.addEventListener("click", clearPinFlow);
 
+      // settings
       bindOptionHandlers();
       bindSummaryDateControls();
 
       // offline badge
-      window.addEventListener("online", ()=>{ ui.uiOffline.hidden = true; });
-      window.addEventListener("offline", ()=>{ ui.uiOffline.hidden = false; });
+      window.addEventListener("online", ()=>{ ui.uiOffline.hidden = true; renderAll(); });
+      window.addEventListener("offline", ()=>{ ui.uiOffline.hidden = false; renderAll(); });
 
-      // render
+      // initial render
       setSplash("Preparando interfaz…");
       renderState.summaryDayKey = dateKeyLocal(now());
       ui.sumDate.value = renderState.summaryDayKey;
-
       renderAll();
 
       // SW
       initSW();
 
-      // refresco suave (solo panel/resumen)
+      // refresco suave (panel/resumen)
       setInterval(()=>{
         const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
         if (active==="panel" || active==="resumen") renderAll();
       }, 15000);
 
       // done
-      setTimeout(()=>hideSplash(), 350);
+      setTimeout(()=>hideSplash(), 250);
 
     } catch (e) {
       console.error(e);
@@ -1518,7 +1555,7 @@
     }
   });
 
-  // guards global (por si algo revienta fuera)
+  // guards global
   bindGlobalGuards();
 
 })();

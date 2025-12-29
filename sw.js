@@ -22,14 +22,25 @@
     "./assets/icons/icon-512-maskable.png"
   ];
 
+  async function safePrecache(cache){
+    // No dejes que un archivo faltante rompa el install.
+    // (Muy típico cuando cambian iconos o rutas)
+    const reqs = CORE.map(u => new Request(u, { cache: "reload" }));
+    const results = await Promise.allSettled(
+      reqs.map(async (req) => {
+        const res = await fetch(req);
+        if (!res || !res.ok) return;
+        await cache.put(req, res.clone());
+      })
+    );
+    // results se ignora a propósito (silent)
+    return results;
+  }
+
   self.addEventListener("install", (e) => {
     e.waitUntil((async () => {
       const c = await caches.open(CACHE);
-
-      // Fuerza a saltarse caches HTTP del navegador durante install
-      const reqs = CORE.map(u => new Request(u, { cache: "reload" }));
-      await c.addAll(reqs);
-
+      await safePrecache(c);
       // No hacemos skipWaiting aquí (evita loops raros en iOS)
     })());
   });
@@ -66,7 +77,7 @@
     const url = new URL(req.url);
     if (url.origin !== self.location.origin) return;
 
-    // Navegación: network-first, fallback cache (ignora query para evitar “no recarga nada”)
+    // Navegación: network-first, fallback cache (ignoreSearch)
     if (req.mode === "navigate") {
       e.respondWith((async () => {
         const c = await caches.open(CACHE);
@@ -98,10 +109,12 @@
       e.respondWith((async () => {
         const c = await caches.open(CACHE);
         const cached = await c.match(req, { ignoreSearch: true });
+
         const net = fetch(req).then(res => {
-          c.put(req, res.clone()).catch(()=>{});
+          if (res && res.ok) c.put(req, res.clone()).catch(()=>{});
           return res;
         }).catch(()=>null);
+
         return cached || (await net) || Response.error();
       })());
       return;
@@ -111,10 +124,12 @@
     e.respondWith((async () => {
       const c = await caches.open(CACHE);
       const cached = await c.match(req);
+
       const net = fetch(req).then(res => {
-        c.put(req, res.clone()).catch(()=>{});
+        if (res && res.ok) c.put(req, res.clone()).catch(()=>{});
         return res;
       }).catch(()=>null);
+
       return cached || (await net) || Response.error();
     })());
   });
