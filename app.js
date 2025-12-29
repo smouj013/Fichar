@@ -1,31 +1,29 @@
-/* app.js — ClockIn v2.0.3 (STABLE + UI PRO + PWA + INSTALL + AUTO-UPDATE)
-   ✅ Features:
-   - Empleados + horario semanal por día
-   - Fichaje: Entrada/Salida + Pausas (inicio/fin)
-   - Resumen diario (tabla) + export CSV
-   - Historial con filtros + export CSV + paginación
-   - Backup/Restore JSON
-   - PIN opcional (protege borrar/import/export)
-   - Geolocalización opcional (guardada en eventos)
-   - Detección: móvil/desktop + standalone PWA + botón Instalar (Chromium)
-   - Auto-update robusto: pill + opción auto-aplicar (anti-loops)
-   - FIX Opera GX: el splash NUNCA bloquea la UI (se fuerza hidden + pointer events)
+/* app.js — ClockIn v2.0.4 (STABLE + UI PRO + PWA + INSTALL + AUTO-UPDATE)
+   ✅ Compat con tu index.html v2.0.3 (IDs/estructura) y styles.css v2.0.4
+   ✅ Fixes clave:
+   - Splash: NO bloquea nunca (pointer-events none + hidden+display none)
+   - Modal: hardHide seguro + evita “modal colgado”
+   - Routing: evita parpadeos/stack, anima solo el view activo
+   - Schedule editor: inputs type="time" con layout responsive sin depender de grid fijo
+   - Historial: paginación robusta + filtros estables
+   - Restore: normaliza schema + asegura schedule + settings + pin
+   - SW update: anti-loop + updatefound/waiting correctos
 */
 
 (() => {
   "use strict";
 
   // ───────────────────────── Version / Guard ─────────────────────────
-  const APP_VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.0.3");
+  const APP_VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.0.4");
   const g = (typeof globalThis !== "undefined") ? globalThis : window;
-  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V203";
+  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V204";
   try { if (g && g[LOAD_GUARD]) return; if (g) g[LOAD_GUARD] = true; } catch (_) {}
 
   // ───────────────────────── Storage ─────────────────────────
   const STORAGE_KEY = "clockin_state_v2";
   const LEGACY_KEYS = ["clockin_state_v1", "clockin_state_v1_0", "clockin_state_v1.0.0"];
 
-  // Días semana (ISO-like: lunes primero para UI)
+  // Días semana (ISO-like)
   const DOW_KEYS = ["mon","tue","wed","thu","fri","sat","sun"];
   const DOW_LABEL = { mon:"Lun", tue:"Mar", wed:"Mié", thu:"Jue", fri:"Vie", sat:"Sáb", sun:"Dom" };
 
@@ -146,7 +144,6 @@
 
   // ───────────────────────── State schema ─────────────────────────
   function defaultSchedule(){
-    // Por defecto: L-V 09:00-17:00, S/D libres
     const s = {};
     for (const k of DOW_KEYS) s[k] = { enabled: false, start: "09:00", end: "17:00" };
     for (const k of ["mon","tue","wed","thu","fri"]) s[k].enabled = true;
@@ -167,7 +164,7 @@
         compact: false,
         haptics: true,
         geoEnabled: false,
-        pin: {                    // PIN opcional
+        pin: {
           enabled: false,
           salt: "",
           hash: "",
@@ -193,6 +190,39 @@
     return out;
   }
 
+  function normalizeState(parsed){
+    const base = defaultState();
+    const st = Object.assign(base, parsed || {});
+    st.schema = 2;
+    st.version = APP_VERSION;
+
+    st.settings = Object.assign(base.settings, (parsed && parsed.settings) || {});
+    st.settings.pin = Object.assign(base.settings.pin, (parsed && parsed.settings && parsed.settings.pin) || {});
+
+    st.employees = Array.isArray(parsed && parsed.employees)
+      ? parsed.employees.map(e => ({
+          id: String(e.id || uid()),
+          name: String(e.name || "Empleado"),
+          schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
+        }))
+      : [];
+
+    st.events = Array.isArray(parsed && parsed.events)
+      ? parsed.events.map(ev => ({
+          id: String(ev.id || uid()),
+          ts: Number(ev.ts || nowMs()),
+          empId: String(ev.empId || ""),
+          type: String(ev.type || EVT.IN),
+          note: typeof ev.note === "string" ? ev.note : "",
+          geo: (ev && ev.geo) ? ev.geo : null,
+          hash: String(ev.hash || fnv1a(String(ev.id||"") + "|" + String(ev.ts||"") + "|" + String(ev.empId||"") + "|" + String(ev.type||"")))
+        })).filter(x => x.empId && Number.isFinite(x.ts))
+      : [];
+
+    st.updatedAt = nowMs();
+    return st;
+  }
+
   function migrateLegacyIfNeeded(){
     for (const k of LEGACY_KEYS){
       const raw = localStorage.getItem(k);
@@ -201,28 +231,7 @@
       if (!localStorage.getItem(STORAGE_KEY)){
         const old = safeJsonParse(raw, null);
         if (old && typeof old === "object"){
-          const st = defaultState();
-
-          if (Array.isArray(old.employees)){
-            st.employees = old.employees.map(e => ({
-              id: String(e.id || uid()),
-              name: String(e.name || "Empleado"),
-              schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
-            }));
-          }
-
-          if (Array.isArray(old.events)){
-            st.events = old.events.map(ev => ({
-              id: String(ev.id || uid()),
-              ts: Number(ev.ts || nowMs()),
-              empId: String(ev.empId || ""),
-              type: String(ev.type || EVT.IN),
-              note: typeof ev.note === "string" ? ev.note : "",
-              geo: ev.geo || null,
-              hash: String(ev.hash || fnv1a(String(ev.id || "") + "|" + String(ev.ts || "")))
-            })).filter(x => x.empId && Number.isFinite(x.ts));
-          }
-
+          const st = normalizeState(old);
           saveState(st);
         }
       }
@@ -236,37 +245,7 @@
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? safeJsonParse(raw, null) : null;
     if (!parsed || typeof parsed !== "object") return defaultState();
-
-    const base = defaultState();
-    const st = Object.assign(base, parsed);
-
-    st.settings = Object.assign(base.settings, parsed.settings || {});
-    st.settings.pin = Object.assign(base.settings.pin, (parsed.settings && parsed.settings.pin) || {});
-
-    st.employees = Array.isArray(parsed.employees)
-      ? parsed.employees.map(e => ({
-          id: String(e.id || uid()),
-          name: String(e.name || "Empleado"),
-          schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
-        }))
-      : [];
-
-    st.events = Array.isArray(parsed.events)
-      ? parsed.events.map(ev => ({
-          id: String(ev.id || uid()),
-          ts: Number(ev.ts || nowMs()),
-          empId: String(ev.empId || ""),
-          type: String(ev.type || EVT.IN),
-          note: typeof ev.note === "string" ? ev.note : "",
-          geo: ev.geo || null,
-          hash: String(ev.hash || fnv1a(String(ev.id||"") + "|" + String(ev.ts||"")))
-        })).filter(x => x.empId && Number.isFinite(x.ts))
-      : [];
-
-    st.schema = 2;
-    st.version = APP_VERSION;
-    st.updatedAt = nowMs();
-    return st;
+    return normalizeState(parsed);
   }
 
   function saveState(st){
@@ -281,7 +260,6 @@
   // ───────────────────────── UI: Toasts / Modal ─────────────────────────
   const toasts = $("#toasts");
   function toast(kind, msg, sub){
-    // kind: info|ok|warn|error
     if (!toasts) return;
 
     const t = el("div", "toast");
@@ -296,7 +274,6 @@
     m.style.fontWeight = "900";
     m.style.marginBottom = sub ? "4px" : "0";
     m.textContent = msg || "";
-
     body.appendChild(m);
 
     if (sub){
@@ -308,8 +285,8 @@
 
     t.appendChild(ic);
     t.appendChild(body);
-
     toasts.appendChild(t);
+
     setTimeout(() => { try { t.remove(); } catch(_) {} }, 4200);
   }
 
@@ -325,13 +302,14 @@
     if (!modalBackdrop) return;
     modalBackdrop.hidden = true;
     modalBackdrop.style.display = "none";
+    modalBackdrop.classList.remove("is-open");
     document.body.classList.remove("modal-open");
   }
 
   function closeModal(){
     if (!modalBackdrop) return;
-    modalBackdrop.classList.remove("is-open");
 
+    modalBackdrop.classList.remove("is-open");
     setTimeout(() => {
       modalBackdrop.hidden = true;
       modalBackdrop.style.display = "none";
@@ -383,8 +361,7 @@
 
   function confirmDialog(title, message, yesLabel="Confirmar", noLabel="Cancelar"){
     const wrap = el("div");
-    const p = el("div");
-    p.className = "muted";
+    const p = el("div", "muted");
     p.style.lineHeight = "1.55";
     p.textContent = message || "";
     wrap.appendChild(p);
@@ -470,9 +447,7 @@
       if (r) r(false);
     });
 
-    // foco
     setTimeout(() => { try { input.focus(); } catch(_) {} }, 60);
-
     const res = await openModal({ title:"PIN requerido", contentNode: wrap, actions:[cancel, ok] });
     return !!res;
   }
@@ -480,7 +455,7 @@
   // ───────────────────────── Detect device / mode + Install ─────────────────────────
   function isStandalone(){
     try{
-      if (typeof navigator !== "undefined" && "standalone" in navigator && navigator.standalone) return true; // iOS
+      if (typeof navigator !== "undefined" && "standalone" in navigator && navigator.standalone) return true;
       return window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
     }catch(_){ return false; }
   }
@@ -512,7 +487,6 @@
   function setupInstallButton(){
     if (!btnInstall) return;
 
-    // Si ya está instalada, ocultar
     if (isStandalone()) {
       btnInstall.hidden = true;
       return;
@@ -573,7 +547,13 @@
       return;
     }
 
-    // Update found
+    // Si al cargar ya hay waiting
+    if (swReg.waiting && navigator.serviceWorker.controller){
+      swWaiting = swReg.waiting;
+      showUpdatePill(st, true);
+      if (st.settings.autoUpdate) applyUpdateNow(st);
+    }
+
     swReg.addEventListener("updatefound", () => {
       const installing = swReg.installing;
       if (!installing) return;
@@ -589,24 +569,16 @@
       });
     });
 
-    // waiting at load
-    if (swReg.waiting && navigator.serviceWorker.controller){
-      swWaiting = swReg.waiting;
-      showUpdatePill(st, true);
-      if (st.settings.autoUpdate) applyUpdateNow(st);
-    }
-
-    // controller change => reload (anti loop)
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (!canReloadNow()) return;
       markReloadGuard();
       location.reload();
     });
 
-    // update checks (suave)
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") swReg?.update().catch(()=>{});
     });
+
     setInterval(() => { swReg?.update().catch(()=>{}); }, 60 * 60 * 1000);
   }
 
@@ -797,7 +769,6 @@
   const btnWipe = $("#btnWipe");
   const filePicker = $("#filePicker");
 
-  // Tabs routing
   const tabs = $$(".tab");
   const views = $$(".view");
 
@@ -845,8 +816,9 @@
     uiCounts.textContent = `${n} empleados · ${inside} dentro`;
   }
 
-  function pillText(text){
+  function pillText(text, kind){
     const p = el("span", "pill");
+    if (kind) p.classList.add(kind);
     p.textContent = text;
     return p;
   }
@@ -903,7 +875,6 @@
     const emp = getEmployeeById(st, empId);
     if (!emp) return;
 
-    // Dentro -> OUT
     if (ds.isInside){
       if (st.settings.confirmActions){
         const ok = await confirmDialog("Salida", `¿Cerrar salida de "${emp.name}" ahora?`, "Salida", "Cancelar");
@@ -922,7 +893,6 @@
       return;
     }
 
-    // Fuera -> IN
     if (st.settings.confirmActions){
       const ok = await confirmDialog("Entrada", `¿Registrar entrada de "${emp.name}" ahora?`, "Entrada", "Cancelar");
       if (!ok) return;
@@ -1006,7 +976,8 @@
 
       const sub = el("div", "emp-sub");
 
-      sub.appendChild(pillText(ds.status));
+      const statusKind = ds.status === "Dentro" ? "ok" : (ds.status === "En pausa" ? "warn" : "");
+      sub.appendChild(pillText(ds.status, statusKind));
 
       const sched = getScheduleForDate(emp, today);
       sub.appendChild(pillText(sched ? `${sched.start}–${sched.end}` : "Sin horario"));
@@ -1015,10 +986,10 @@
       sub.appendChild(pillText(`S: ${ds.outAt ? fmtTime(new Date(ds.outAt)) : "—"}`));
 
       if (ds.breakMins > 0 || ds.breakOpen){
-        sub.appendChild(pillText(`Pausa: ${fmtHMFromMinutes(ds.breakMins)}${ds.breakOpen ? " (…)" : ""}`));
+        sub.appendChild(pillText(`Pausa: ${fmtHMFromMinutes(ds.breakMins)}${ds.breakOpen ? " (…)" : ""}`, ds.breakOpen ? "warn" : ""));
       }
       if (ds.workedMins > 0){
-        sub.appendChild(pillText(`Trab: ${fmtHMFromMinutes(ds.workedMins)}`));
+        sub.appendChild(pillText(`Trab: ${fmtHMFromMinutes(ds.workedMins)}`, "ok"));
       }
 
       meta.appendChild(name);
@@ -1147,6 +1118,8 @@
       if (r) r(null);
     });
 
+    setTimeout(() => { try { iName.focus(); } catch(_) {} }, 60);
+
     const res = await openModal({ title:"Añadir empleado", contentNode: wrap, actions:[cancel, create] });
     if (res){
       toast("ok", "Empleado creado", "Ahora puedes editar el horario.");
@@ -1155,18 +1128,21 @@
     }
   }
 
-  function scheduleRow(k, val){
+  function makeScheduleRow(k, val){
     const row = el("div");
     row.style.display = "grid";
-    row.style.gridTemplateColumns = "1fr 140px 140px";
+    row.style.gridTemplateColumns = "1fr";
     row.style.gap = "10px";
-    row.style.alignItems = "center";
+    row.style.padding = "10px 12px";
+    row.style.border = "1px solid rgba(255,255,255,.08)";
+    row.style.borderRadius = "14px";
+    row.style.background = "rgba(255,255,255,.03)";
 
-    const left = el("div");
-    left.style.display = "flex";
-    left.style.alignItems = "center";
-    left.style.justifyContent = "space-between";
-    left.style.gap = "10px";
+    const top = el("div");
+    top.style.display = "flex";
+    top.style.alignItems = "center";
+    top.style.justifyContent = "space-between";
+    top.style.gap = "10px";
 
     const label = el("div", "muted");
     label.style.fontWeight = "900";
@@ -1191,8 +1167,13 @@
     boxWrap.appendChild(t);
     boxWrap.appendChild(lbl);
 
-    left.appendChild(label);
-    left.appendChild(boxWrap);
+    top.appendChild(label);
+    top.appendChild(boxWrap);
+
+    const timeRow = el("div");
+    timeRow.style.display = "grid";
+    timeRow.style.gridTemplateColumns = "1fr 1fr";
+    timeRow.style.gap = "10px";
 
     const start = document.createElement("input");
     start.type = "time";
@@ -1201,6 +1182,9 @@
     const end = document.createElement("input");
     end.type = "time";
     end.value = val.end || "17:00";
+
+    start.style.width = "100%";
+    end.style.width = "100%";
 
     const applyEnabled = () => {
       const on = chk.checked;
@@ -1213,9 +1197,11 @@
     chk.addEventListener("change", applyEnabled);
     applyEnabled();
 
-    row.appendChild(left);
-    row.appendChild(start);
-    row.appendChild(end);
+    timeRow.appendChild(start);
+    timeRow.appendChild(end);
+
+    row.appendChild(top);
+    row.appendChild(timeRow);
 
     return { row, chk, start, end };
   }
@@ -1240,7 +1226,7 @@
     const sch = el("div", "grid");
     const rows = {};
     for (const k of DOW_KEYS){
-      const r = scheduleRow(k, emp.schedule?.[k] || { enabled:false, start:"09:00", end:"17:00" });
+      const r = makeScheduleRow(k, emp.schedule?.[k] || { enabled:false, start:"09:00", end:"17:00" });
       rows[k] = r;
       sch.appendChild(r.row);
     }
@@ -1288,6 +1274,8 @@
       if (rsv) rsv(false);
     });
 
+    setTimeout(() => { try { iName.focus(); iName.select(); } catch(_) {} }, 60);
+
     await openModal({ title:`Editar: ${emp.name}`, contentNode: wrap, actions:[cancel, save] });
     refreshAll(st);
   }
@@ -1313,9 +1301,10 @@
     if (!summaryTable) return;
     const tbody = $("tbody", summaryTable);
     if (!tbody) return;
-    tbody.innerHTML = "";
 
+    tbody.innerHTML = "";
     const iso = (sumDate && sumDate.value) ? sumDate.value : toISODate(new Date());
+
     const frag = document.createDocumentFragment();
 
     for (const emp of st.employees){
@@ -1452,6 +1441,7 @@
 
   function rebuildHistoryFilters(st){
     if (!fEmp) return;
+    const current = fEmp.value || "all";
     fEmp.innerHTML = "";
 
     const optAll = document.createElement("option");
@@ -1465,6 +1455,10 @@
       o.textContent = emp.name;
       fEmp.appendChild(o);
     }
+
+    // intenta mantener selección
+    const stillExists = current === "all" || st.employees.some(e => e.id === current);
+    fEmp.value = stillExists ? current : "all";
   }
 
   // ───────────────────────── CSV ─────────────────────────
@@ -1500,7 +1494,6 @@
     };
 
     const arr = computeFilteredEvents(st, filter);
-
     const lines = [];
     lines.push(["Fecha","Hora","Empleado","Tipo","Nota","Lat","Lon","Acc(m)","Hash"].map(csvEscape).join(","));
 
@@ -1584,6 +1577,14 @@
       applyTheme(st.settings.theme);
       saveState(st);
     });
+
+    // Si el usuario cambia el tema del sistema con theme=system
+    try{
+      const mq = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
+      mq?.addEventListener?.("change", () => {
+        if (st.settings.theme === "system") applyTheme("system");
+      });
+    }catch(_){}
 
     optAutoUpdate?.addEventListener("change", () => {
       st.settings.autoUpdate = !!optAutoUpdate.checked;
@@ -1680,6 +1681,7 @@
       if (r) r(false);
     });
 
+    setTimeout(() => { try { i1.focus(); } catch(_) {} }, 60);
     await openModal({ title:"Configurar PIN", contentNode: wrap, actions:[cancel, ok] });
   }
 
@@ -1712,18 +1714,22 @@
     }
 
     for (const v of views){
-      if (v.dataset.route === route){
+      const isTarget = v.dataset.route === route;
+      if (isTarget){
         v.hidden = false;
         v.classList.add("view-enter");
         requestAnimationFrame(() => v.classList.add("is-entering"));
         setTimeout(() => v.classList.remove("view-enter", "is-entering"), 240);
-      }else if (!v.hidden){
-        v.classList.add("view-exit");
-        requestAnimationFrame(() => v.classList.add("is-exiting"));
-        setTimeout(() => {
-          v.hidden = true;
-          v.classList.remove("view-exit", "is-exiting");
-        }, 220);
+      }else{
+        // Oculta “sin animar” si ya estaba hidden; anima solo si estaba visible.
+        if (!v.hidden){
+          v.classList.add("view-exit");
+          requestAnimationFrame(() => v.classList.add("is-exiting"));
+          setTimeout(() => {
+            v.hidden = true;
+            v.classList.remove("view-exit", "is-exiting");
+          }, 220);
+        }
       }
     }
 
@@ -1849,7 +1855,8 @@
           }
 
           try{
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(incoming));
+            const norm = normalizeState(incoming);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(norm));
             state = loadState();
             applySettingsToUI(state);
             refreshAll(state);
@@ -1877,13 +1884,11 @@
   // ───────────────────────── Online/Offline & ticks ─────────────────────────
   window.addEventListener("online", () => setOfflineBadge());
   window.addEventListener("offline", () => setOfflineBadge());
-
   setInterval(() => { setHeaderDate(); }, 60 * 1000);
 
   // ───────────────────────── Splash FIX (Opera GX / overlays) ─────────────────────────
   function forceSplashNonBlocking(){
     if (!splash) return;
-    // Aunque el CSS ya lo hace, aquí lo blindamos por JS.
     splash.style.pointerEvents = "none";
   }
 
@@ -1895,8 +1900,8 @@
 
     setTimeout(() => {
       try{
-        splash.hidden = true;          // ✅ clave
-        splash.style.display = "none"; // ✅ clave
+        splash.hidden = true;
+        splash.style.display = "none";
         splash.style.pointerEvents = "none";
       }catch(_){}
     }, 260);
@@ -1906,7 +1911,6 @@
   let state = loadState();
 
   function init(){
-    // Hard safety: si por cualquier razón el modalBackdrop se queda visible
     hardHideBackdrop();
     forceSplashNonBlocking();
 
@@ -1933,6 +1937,9 @@
     rebuildHistoryFilters(state);
     refreshAll(state);
 
+    // Mantén el route inicial como Panel, por si algún navegador restaura scroll/estado raro
+    try { showRoute("panel"); } catch(_) {}
+
     hideSplash();
   }
 
@@ -1942,7 +1949,6 @@
     console.error(e);
     toast("error", "Error crítico", "Usa Repair si se queda atascado.");
     if (splashMsg) splashMsg.textContent = "Error al iniciar";
-    // Aun así, intenta liberar la UI
     try { hideSplash(); } catch(_) {}
   }
 
