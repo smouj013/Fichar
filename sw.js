@@ -1,17 +1,14 @@
-/* sw.js — ClockIn v2.0.1 */
+/* sw.js — ClockIn v1.0.0 */
 (() => {
   "use strict";
 
-  const VERSION = "2.0.1";
-  const CACHE_NAME = `clockin-cache-${VERSION}`;
-
-  // OJO: están con query-string para forzar updates aunque el navegador sea pesado con caché
-  const ASSETS = [
+  const VERSION = "1.0.0";
+  const CACHE = `clockin-${VERSION}`;
+  const CORE = [
     "./",
-    "./index.html?v=2.0.1",
-    "./styles.css?v=2.0.1",
-    "./app.js?v=2.0.1",
-    "./manifest.webmanifest?v=2.0.1",
+    "./index.html",
+    "./styles.css",
+    "./app.js",
     "./manifest.webmanifest",
     "./assets/icons/favicon-32.png",
     "./assets/icons/apple-touch-icon-152.png",
@@ -23,67 +20,55 @@
     "./assets/icons/icon-512-maskable.png"
   ];
 
-  self.addEventListener("install", (event) => {
-    event.waitUntil((async () => {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.addAll(ASSETS);
-      await self.skipWaiting();
+  self.addEventListener("install", (e) => {
+    e.waitUntil((async () => {
+      const c = await caches.open(CACHE);
+      await c.addAll(CORE);
+      // NO skipWaiting aquí para evitar comportamientos raros en iOS / loops
     })());
   });
 
-  self.addEventListener("activate", (event) => {
-    event.waitUntil((async () => {
+  self.addEventListener("activate", (e) => {
+    e.waitUntil((async () => {
       const keys = await caches.keys();
-      await Promise.all(keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve())));
+      await Promise.all(keys.map(k => (k !== CACHE ? caches.delete(k) : null)));
       await self.clients.claim();
     })());
   });
 
-  self.addEventListener("message", (event) => {
-    if (!event.data) return;
-    if (event.data.type === "SKIP_WAITING") self.skipWaiting();
+  self.addEventListener("message", (e) => {
+    if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting();
   });
 
-  self.addEventListener("fetch", (event) => {
-    const req = event.request;
+  self.addEventListener("fetch", (e) => {
+    const req = e.request;
     if (req.method !== "GET") return;
 
     const url = new URL(req.url);
-
-    // Solo mismo origen
     if (url.origin !== self.location.origin) return;
 
-    // Navegación: intenta red y cae al index cacheado
+    // Navegación: cache fallback si no hay red
     if (req.mode === "navigate") {
-      event.respondWith((async () => {
+      e.respondWith((async () => {
         try {
           const fresh = await fetch(req);
-          const cache = await caches.open(CACHE_NAME);
-          cache.put(req, fresh.clone()).catch(() => {});
+          const c = await caches.open(CACHE);
+          c.put("./index.html", fresh.clone()).catch(() => {});
           return fresh;
         } catch (_) {
-          const cache = await caches.open(CACHE_NAME);
-          return (await cache.match("./index.html?v=2.0.1")) || (await cache.match("./")) || Response.error();
+          const c = await caches.open(CACHE);
+          return (await c.match("./index.html")) || (await c.match("./")) || Response.error();
         }
       })());
       return;
     }
 
-    // Estáticos: cache-first + revalidate
-    event.respondWith((async () => {
-      const cache = await caches.open(CACHE_NAME);
-      const cached = await cache.match(req);
-      if (cached) {
-        fetch(req).then((res) => cache.put(req, res.clone()).catch(() => {})).catch(() => {});
-        return cached;
-      }
-      try {
-        const res = await fetch(req);
-        cache.put(req, res.clone()).catch(() => {});
-        return res;
-      } catch (_) {
-        return cached || Response.error();
-      }
+    // Stale-while-revalidate
+    e.respondWith((async () => {
+      const c = await caches.open(CACHE);
+      const cached = await c.match(req);
+      const net = fetch(req).then(res => { c.put(req, res.clone()).catch(() => {}); return res; }).catch(() => null);
+      return cached || (await net) || Response.error();
     })());
   });
 })();
