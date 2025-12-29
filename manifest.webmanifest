@@ -1,7 +1,7 @@
 {
-  "name": "Fichaje — Smouj013",
+  "name": "Panel de Fichaje — Smouj013",
   "short_name": "Fichaje",
-  "description": "App para fichar: entrada/pausa/salida, resumen diario y exportación CSV.",
+  "description": "Vista general de empleados con horario semanal y fichaje diario (entrada/salida).",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

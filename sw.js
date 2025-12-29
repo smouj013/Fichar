@@ -1,8 +1,8 @@
 /*
-  sw.js — PWA offline
+  sw.js — Panel de Fichaje (PWA offline)
   Smouj013
 */
-const CACHE = "fichaje-cache-v1";
+const CACHE = "smouj013-fichaje-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -32,7 +32,6 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
-
   if (url.origin !== location.origin) return;
 
   event.respondWith((async () => {

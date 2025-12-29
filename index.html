@@ -1,7 +1,7 @@
 <!doctype html>
 <!--
-  Fichaje (PWA) — Smouj013
-  Entrada / Pausa / Volver / Salida + Resumen + Export CSV
+  Panel de Fichaje (PWA) — Smouj013
+  Vista general: lista de empleados + fichaje por fila + horario semanal
 -->
 <html lang="es">
 <head>
@@ -9,100 +9,93 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#0b0b10" />
-  <meta name="description" content="App de fichaje: entrada/pausa/salida, resumen diario y exportación CSV." />
+  <meta name="description" content="Panel de fichaje: empleados, turnos semanales y fichaje por día con entrada/salida." />
 
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="stylesheet" href="./styles.css" />
 
-  <title>Fichaje — Smouj013</title>
+  <title>Panel de Fichaje — Smouj013</title>
 </head>
 
 <body>
   <noscript>
-    <div class="noscript">
-      Necesitas JavaScript activado para usar esta app.
-    </div>
+    <div class="noscript">Necesitas JavaScript activado para usar esta app.</div>
   </noscript>
-
-  <!-- Banner si el JS no llega a cargar -->
-  <div class="jsfail" id="jsFail" hidden>
-    ⚠️ No se ha cargado app.js (o ha fallado). Abre la consola (F12) y revisa errores.
-    <div class="jsfail-sub">Comprueba que <b>app.js</b> está junto a <b>index.html</b> y que lo abres vía servidor (http://), no como file://</div>
-  </div>
 
   <div class="app">
     <header class="topbar">
       <div class="brand">
-        <div class="logo">⏱️</div>
+        <div class="logo">🕒</div>
         <div class="brandText">
-          <div class="title" id="companyName">Fichaje</div>
-          <div class="sub" id="employeeName">Sin usuario</div>
+          <div class="title" id="companyName">Panel de Fichaje</div>
+          <div class="sub" id="subTitle">Vista general</div>
         </div>
       </div>
 
       <div class="topActions">
+        <button class="btn ghost" id="btnExportDay" type="button" title="Exportar día">⬇️ Día</button>
+        <button class="btn ghost" id="btnExportWeek" type="button" title="Exportar semana">⬇️ Semana</button>
         <button class="btn ghost" id="btnSettings" type="button" title="Ajustes">⚙️</button>
       </div>
     </header>
 
     <main class="main">
-      <section class="card statusCard">
-        <div class="statusRow">
-          <div class="statusLeft">
-            <div class="statusLabel">Estado</div>
-            <div class="statusValue" id="statusText">—</div>
-            <div class="statusMeta" id="statusMeta">—</div>
+      <section class="card controls">
+        <div class="controlsRow">
+          <div class="dateBox">
+            <div class="label">Fecha</div>
+            <div class="dateRow">
+              <button class="btn" id="btnPrevDay" type="button">◀</button>
+              <input class="input" id="datePicker" type="date" />
+              <button class="btn" id="btnNextDay" type="button">▶</button>
+              <button class="btn ghost" id="btnToday" type="button">Hoy</button>
+            </div>
+            <div class="hint" id="dateHint">—</div>
           </div>
 
-          <div class="timerBox">
-            <div class="timerLabel">Tiempo</div>
-            <div class="timerValue" id="timerText">00:00:00</div>
-            <div class="timerHint" id="timerHint">—</div>
+          <div class="searchBox">
+            <div class="label">Buscar</div>
+            <input class="input" id="searchInput" placeholder="Filtrar por nombre…" maxlength="40" />
+            <div class="hint">Tip: escribe “ana”, “carlos”…</div>
           </div>
-        </div>
-
-        <div class="actionRow">
-          <button class="btn primary" id="btnIn" type="button">Entrar</button>
-          <button class="btn warn" id="btnBreakStart" type="button">Pausa</button>
-          <button class="btn warn" id="btnBreakEnd" type="button">Volver</button>
-          <button class="btn danger" id="btnOut" type="button">Salir</button>
-        </div>
-
-        <div class="minorRow">
-          <input class="input" id="noteInput" placeholder="Nota opcional (ej: reunión, médico…)" maxlength="120" />
-          <button class="btn" id="btnAddNote" type="button">Añadir nota</button>
-        </div>
-
-        <div class="integrityRow" id="integrityRow" hidden>
-          <span class="badge bad">⚠️ Integridad</span>
-          <span class="integrityText" id="integrityText">Inconsistencia detectada.</span>
         </div>
       </section>
 
-      <section class="card">
-        <div class="cardHead">
-          <div>
-            <div class="cardTitle">Resumen</div>
-            <div class="cardSub">Horas por día (trabajo y pausas)</div>
+      <section class="card listCard">
+        <div class="listHead">
+          <div class="listTitle">
+            <div class="cardTitle">Empleados</div>
+            <div class="cardSub" id="listSub">—</div>
           </div>
 
-          <div class="cardActions">
-            <button class="btn" id="btnExport" type="button">Exportar CSV</button>
-            <button class="btn ghost" id="btnClear" type="button">Borrar todo</button>
+          <div class="listLegend">
+            <span class="chip chip-ok">● Dentro</span>
+            <span class="chip chip-warn">● En turno (sin fichar)</span>
+            <span class="chip chip-muted">● Sin turno</span>
           </div>
         </div>
 
-        <div class="days" id="days"></div>
+        <div class="tableWrap" role="region" aria-label="Lista de empleados">
+          <div class="tableHead">
+            <div>Empleado</div>
+            <div>Turno de hoy</div>
+            <div>Entrada</div>
+            <div>Salida</div>
+            <div>Acción</div>
+          </div>
+
+          <div class="tableBody" id="employeeList"></div>
+        </div>
       </section>
 
-      <section class="card">
+      <section class="card logsCard">
         <div class="cardHead">
           <div>
-            <div class="cardTitle">Eventos</div>
-            <div class="cardSub">Registro cronológico</div>
+            <div class="cardTitle">Registro</div>
+            <div class="cardSub">Eventos del día seleccionado (append-only)</div>
           </div>
           <div class="cardActions">
-            <button class="btn ghost" id="btnExportRaw" type="button">Exportar eventos (CSV)</button>
+            <button class="btn ghost" id="btnClearDay" type="button">Borrar fichajes del día</button>
           </div>
         </div>
 
@@ -128,58 +121,91 @@
     <div class="modalHead">
       <div>
         <div class="modalTitle" id="settingsTitle">Ajustes</div>
-        <div class="modalSub">Empresa, empleado y opciones</div>
+        <div class="modalSub">Empresa, empleados y horarios semanales</div>
       </div>
       <button class="btn ghost" id="btnCloseSettings" type="button">✕</button>
     </div>
 
     <div class="modalBody">
-      <label class="field">
-        <span>Empresa</span>
-        <input class="input" id="inpCompany" placeholder="Ej: Mi Empresa S.L." maxlength="40" />
-      </label>
+      <div class="grid2">
+        <label class="field">
+          <span>Empresa</span>
+          <input class="input" id="inpCompany" placeholder="Ej: Mi Empresa S.L." maxlength="40" />
+        </label>
 
-      <label class="field">
-        <span>Empleado</span>
-        <input class="input" id="inpEmployee" placeholder="Ej: Juan Pérez" maxlength="40" />
-      </label>
-
-      <label class="field row">
-        <span>Solicitar PIN para exportar/borrar</span>
-        <input type="checkbox" id="chkPin" />
-      </label>
+        <label class="field row">
+          <span>Solicitar PIN para exportar/borrar</span>
+          <input type="checkbox" id="chkPin" />
+        </label>
+      </div>
 
       <label class="field">
         <span>PIN (4–10 dígitos)</span>
         <input class="input" id="inpPin" inputmode="numeric" placeholder="••••" maxlength="10" />
-        <div class="hint">Si activas el PIN, se pedirá para exportar o borrar.</div>
+        <div class="hint">Si activas el PIN, se pedirá para exportar y borrar.</div>
       </label>
 
-      <label class="field row">
-        <span>Guardar ubicación (opcional)</span>
-        <input type="checkbox" id="chkGeo" />
-      </label>
+      <div class="divider"></div>
+
+      <div class="cardMini">
+        <div class="miniHead">
+          <div>
+            <div class="miniTitle">Empleados</div>
+            <div class="miniSub">Añade, edita y define su horario semanal.</div>
+          </div>
+        </div>
+
+        <div class="addRow">
+          <input class="input" id="inpNewEmployee" placeholder="Nombre del empleado" maxlength="40" />
+          <input class="input color" id="inpNewColor" type="color" value="#6ee7ff" />
+          <button class="btn primary" id="btnAddEmployee" type="button">Añadir</button>
+        </div>
+
+        <div class="empAdminList" id="empAdminList"></div>
+      </div>
 
       <div class="smallNote">
-        Importante: para PWA/offline, abre con <b>http://</b> (servidor), no con <b>file://</b>.
+        Nota: esto funciona local (offline). Para uso real de empresa necesitarías servidor y usuarios.
       </div>
     </div>
 
     <div class="modalFoot">
-      <button class="btn ghost" id="btnCancelSettings" type="button">Cancelar</button>
+      <button class="btn ghost" id="btnCancelSettings" type="button">Cerrar</button>
       <button class="btn primary" id="btnSaveSettings" type="button">Guardar</button>
     </div>
   </div>
 
-  <script defer src="./app.js"></script>
+  <!-- Modal editar horario -->
+  <div class="modalBackdrop" id="editBackdrop" hidden></div>
+  <div class="modal" id="editModal" hidden role="dialog" aria-modal="true" aria-labelledby="editTitle">
+    <div class="modalHead">
+      <div>
+        <div class="modalTitle" id="editTitle">Editar horario</div>
+        <div class="modalSub" id="editSub">—</div>
+      </div>
+      <button class="btn ghost" id="btnCloseEdit" type="button">✕</button>
+    </div>
 
-  <script>
-    // Si la app no marca "ready" en ~1.5s, mostramos aviso
-    setTimeout(() => {
-      if (!document.documentElement.dataset.appReady) {
-        document.getElementById("jsFail").hidden = false;
-      }
-    }, 1500);
-  </script>
+    <div class="modalBody">
+      <div class="scheduleTools">
+        <button class="btn" id="btnTemplateWeek" type="button">Plantilla 09:00–17:00 (L–V)</button>
+        <button class="btn ghost" id="btnClearSchedule" type="button">Vaciar horario</button>
+      </div>
+
+      <div class="scheduleGrid" id="scheduleGrid"></div>
+
+      <div class="field">
+        <span>Nota interna (opcional)</span>
+        <input class="input" id="inpEmpNote" maxlength="80" placeholder="Ej: Media jornada, turno partido…" />
+      </div>
+    </div>
+
+    <div class="modalFoot">
+      <button class="btn ghost" id="btnCancelEdit" type="button">Cancelar</button>
+      <button class="btn primary" id="btnSaveEdit" type="button">Guardar</button>
+    </div>
+  </div>
+
+  <script defer src="./app.js"></script>
 </body>
 </html>
