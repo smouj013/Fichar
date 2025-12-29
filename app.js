@@ -10,6 +10,8 @@
 
   const MAX_EVENTS_STEP = 300;
 
+  const CR = (typeof globalThis !== "undefined" && globalThis.crypto) ? globalThis.crypto : null;
+
   function $(sel, root=document){ return root.querySelector(sel); }
   function $$(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
   function pad2(n){ return String(n).padStart(2,"0"); }
@@ -31,6 +33,12 @@
   }
 
   function fatalScreen(title, details){
+    try {
+      const mb = document.getElementById("modalBackdrop");
+      if (mb) mb.hidden = true;
+    } catch(_) {}
+    try { document.body.style.overflow = "auto"; } catch(_) {}
+
     const main = $(".main");
     if (!main) { alert(title + "\n\n" + details); return; }
     main.innerHTML = `
@@ -48,8 +56,9 @@
   }
 
   function now(){ return Date.now(); }
+
   function uid(){
-    try { return crypto.randomUUID(); } catch(_) {}
+    try { if (CR && typeof CR.randomUUID === "function") return CR.randomUUID(); } catch(_) {}
     return "id_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
   }
 
@@ -146,7 +155,14 @@
       return makeDefaultState();
     }
   }
-  function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+  function saveState(){
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      toast("⛔", "No se pudo guardar", "El almacenamiento está bloqueado (modo privado/permisos).");
+    }
+  }
 
   let state = null;
 
@@ -178,16 +194,16 @@
   }
 
   async function sha256Hex(str){
-    if (!crypto || !crypto.subtle) return "";
+    if (!CR || !CR.subtle) return "";
     const enc = new TextEncoder().encode(str);
-    const hash = await crypto.subtle.digest("SHA-256", enc);
+    const hash = await CR.subtle.digest("SHA-256", enc);
     return hexFromBuf(hash);
   }
 
   async function pbkdf2HashB64(password, saltB64, iter){
-    if (!crypto || !crypto.subtle) throw new Error("CryptoSubtle no disponible (necesita HTTPS).");
-    const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), {name:"PBKDF2"}, false, ["deriveBits"]);
-    const bits = await crypto.subtle.deriveBits(
+    if (!CR || !CR.subtle) throw new Error("CryptoSubtle no disponible (necesita HTTPS o localhost).");
+    const keyMaterial = await CR.subtle.importKey("raw", new TextEncoder().encode(password), {name:"PBKDF2"}, false, ["deriveBits"]);
+    const bits = await CR.subtle.deriveBits(
       { name:"PBKDF2", hash:"SHA-256", salt: bufFromB64(saltB64), iterations: iter },
       keyMaterial,
       256
@@ -248,9 +264,13 @@
     modalBody().appendChild(bodyNode);
     modalActions().innerHTML = "";
     (actions||[]).forEach(a => modalActions().appendChild(a));
-    modalBackdrop().hidden = false;
+    const mb = modalBackdrop();
+    if (mb) mb.hidden = false;
   }
-  function closeModal(){ modalBackdrop().hidden = true; }
+  function closeModal(){
+    const mb = modalBackdrop();
+    if (mb) mb.hidden = true;
+  }
 
   function initialsFromName(name){
     const parts = String(name||"").trim().split(/\s+/).filter(Boolean);
@@ -361,7 +381,7 @@
     const bOk = mkBtn("Guardar","btn btn-primary", ()=>{ closeModal(); onOk(ta.value||""); });
 
     openModal(title, wrap, [bCancel,bNo,bOk]);
-    setTimeout(()=>ta.focus(),0);
+    setTimeout(()=>ta && ta.focus(),0);
   }
 
   async function addEvent(empId, type, note){
@@ -393,8 +413,8 @@
     try {
       const hash = await pbkdf2HashB64(pin, p.saltB64, p.iter);
       return constEq(hash, p.hashB64);
-    } catch (e) {
-      toast("⚠️","PIN no disponible", "Necesita HTTPS/crypto.subtle");
+    } catch (_) {
+      toast("⚠️","PIN no disponible", "Necesita HTTPS o localhost");
       return false;
     }
   }
@@ -421,7 +441,7 @@
       });
 
       openModal("Seguridad", wrap, [bCancel,bOk]);
-      setTimeout(()=>pin.focus(),0);
+      setTimeout(()=>pin && pin.focus(),0);
     });
   }
 
@@ -451,7 +471,8 @@
       if (a!==b) { toast("⚠️","No coincide el PIN"); return; }
 
       try {
-        const salt = crypto.getRandomValues(new Uint8Array(16));
+        if (!CR) throw new Error("crypto no disponible");
+        const salt = CR.getRandomValues(new Uint8Array(16));
         const saltB64 = b64FromBuf(salt.buffer);
         const iter = 120000;
         const hashB64 = await pbkdf2HashB64(a, saltB64, iter);
@@ -460,13 +481,13 @@
         closeModal();
         toast("🔐","PIN guardado");
         renderAll();
-      } catch (e) {
-        toast("⛔","No se pudo guardar PIN", "Necesita HTTPS/crypto.subtle");
+      } catch (_) {
+        toast("⛔","No se pudo guardar PIN", "Necesita HTTPS o localhost");
       }
     });
 
     openModal("Configurar PIN", wrap, [bCancel,bOk]);
-    setTimeout(()=>p1.focus(),0);
+    setTimeout(()=>p1 && p1.focus(),0);
   }
 
   async function clearPinFlow(){
@@ -587,7 +608,7 @@
     });
 
     openModal(isEdit ? "Editar empleado" : "Añadir empleado", wrap, [bCancel,bSave]);
-    setTimeout(()=>nameInput.focus(),0);
+    setTimeout(()=>nameInput && nameInput.focus(),0);
   }
 
   async function deleteEmployeeFlow(empId){
@@ -717,7 +738,7 @@
     wrap.innerHTML = `<div class="muted">Esto borrará empleados, horarios y eventos (solo en este dispositivo).</div>`;
     const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
     const bOk = mkBtn("Borrar todo","btn btn-danger", ()=>{
-      localStorage.removeItem(STORAGE_KEY);
+      try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
       closeModal();
       location.reload();
     });
@@ -727,6 +748,38 @@
   // ───────────────────────── Rendering + Routing ─────────────────────────
   const ui = {};
   const renderState = { historyLimit: MAX_EVENTS_STEP, historyLastRows: [] };
+
+  function ensureHistoryFooter(){
+    const hist = $("#view-historial");
+    if (!hist) return;
+
+    // Si ya existe en HTML, perfecto.
+    let count = $("#uiEventCount", hist);
+    let load = $("#btnLoadMore", hist);
+
+    // Si falta, lo creamos dentro del último card del historial.
+    if (!count || !load){
+      let footer = $("#historyFooter", hist);
+      if (!footer){
+        footer = document.createElement("div");
+        footer.id = "historyFooter";
+        footer.className = "row row-between";
+        footer.style.marginTop = "12px";
+        footer.innerHTML = `
+          <span class="badge badge-soft" id="uiEventCount">—</span>
+          <button class="btn btn-ghost" id="btnLoadMore" hidden>Cargar más</button>
+        `;
+        const cards = $$(".card", hist);
+        const target = cards.length ? cards[cards.length - 1] : hist;
+        target.appendChild(footer);
+      }
+      count = $("#uiEventCount", hist);
+      load = $("#btnLoadMore", hist);
+    }
+
+    ui.uiEventCount = count || null;
+    ui.btnLoadMore = load || null;
+  }
 
   function setRoute(route){
     $$(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.route===route));
@@ -853,7 +906,9 @@
   }
 
   function renderHistorial(){
+    ensureHistoryFooter();
     fillEmpFilter();
+
     const allRows = filterEvents();
     const limit = renderState.historyLimit;
     const rows = allRows.slice(0, limit);
@@ -877,8 +932,8 @@
       ui.eventsBody.appendChild(tr);
     }
 
-    ui.uiEventCount.textContent = `Mostrando ${rows.length} de ${allRows.length} evento(s).`;
-    ui.btnLoadMore.hidden = (allRows.length <= limit);
+    if (ui.uiEventCount) ui.uiEventCount.textContent = `Mostrando ${rows.length} de ${allRows.length} evento(s).`;
+    if (ui.btnLoadMore) ui.btnLoadMore.hidden = (allRows.length <= limit);
   }
 
   function renderAjustes(){
@@ -910,8 +965,8 @@
   }
 
   function renderAll(){
-    ui.uiDate.textContent = prettyDateLong(now());
-    ui.uiOffline.hidden = navigator.onLine;
+    if (ui.uiDate) ui.uiDate.textContent = prettyDateLong(now());
+    if (ui.uiOffline) ui.uiOffline.hidden = navigator.onLine;
 
     const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
     if (active==="panel") renderPanel();
@@ -923,6 +978,8 @@
   // ───────────────────────── Service Worker (update pill sin bucles) ─────────────────────────
   async function initSW(){
     if (!("serviceWorker" in navigator)) return;
+    if (!ui.btnUpdate) return;
+
     const btn = ui.btnUpdate;
     try {
       const reg = await navigator.serviceWorker.register("./sw.js");
@@ -940,7 +997,6 @@
         try {
           btn.disabled = true;
           if (reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
-          // recarga suave (una vez)
           setTimeout(()=>location.reload(), 250);
         } catch(_) {
           btn.disabled = false;
@@ -952,7 +1008,7 @@
   // ───────────────────────── Boot ─────────────────────────
   document.addEventListener("DOMContentLoaded", () => {
     try {
-      // cache UI refs
+      // cache UI refs (requeridos)
       ui.uiDate = $("#uiDate");
       ui.uiCounts = $("#uiCounts");
       ui.uiOffline = $("#uiOffline");
@@ -969,10 +1025,22 @@
       ui.fTo = $("#fTo");
 
       ui.btnUpdate = $("#btnUpdate");
-      ui.btnLoadMore = $("#btnLoadMore");
-      ui.uiEventCount = $("#uiEventCount");
-
       ui.tglGeo = $("#tglGeo");
+
+      // Validación mínima para NO quedarse pillado
+      const required = [
+        ["#employeeList", ui.employeeList],
+        ["#employeeAdminList", ui.employeeAdminList],
+        ["#summaryTable tbody", ui.summaryBody],
+        ["#eventsTable tbody", ui.eventsBody],
+        ["#fEmp", ui.fEmp],
+        ["#fFrom", ui.fFrom],
+        ["#fTo", ui.fTo],
+        ["#tglGeo", ui.tglGeo],
+      ];
+      for (const [sel, el] of required){
+        if (!el) throw new Error(`Falta el elemento ${sel} en index.html (ID/estructura incorrecta).`);
+      }
 
       // modal events
       const mClose = $("#modalClose");
@@ -986,35 +1054,60 @@
       // tabs
       $$(".tab").forEach(btn => btn.addEventListener("click", ()=>setRoute(btn.dataset.route)));
 
-      // actions
-      $("#btnQuickAdd").addEventListener("click", ()=>addOrEditEmployeeFlow(null));
-      $("#btnAddEmp").addEventListener("click", ()=>addOrEditEmployeeFlow(null));
+      // actions (con guards)
+      const btnQuickAdd = $("#btnQuickAdd");
+      if (btnQuickAdd) btnQuickAdd.addEventListener("click", ()=>addOrEditEmployeeFlow(null));
 
-      $("#btnExportResumen").addEventListener("click", exportResumenCSV);
-      $("#btnExportEventos").addEventListener("click", ()=>exportEventosCSV(renderState.historyLastRows || null));
+      const btnAddEmp = $("#btnAddEmp");
+      if (btnAddEmp) btnAddEmp.addEventListener("click", ()=>addOrEditEmployeeFlow(null));
 
-      $("#btnApplyFilters").addEventListener("click", ()=>{ renderState.historyLimit = MAX_EVENTS_STEP; renderHistorial(); });
-      ui.btnLoadMore.addEventListener("click", ()=>{ renderState.historyLimit += MAX_EVENTS_STEP; renderHistorial(); });
+      const btnExportResumen = $("#btnExportResumen");
+      if (btnExportResumen) btnExportResumen.addEventListener("click", exportResumenCSV);
 
-      $("#btnBackup").addEventListener("click", backupJSON);
+      const btnExportEventos = $("#btnExportEventos");
+      if (btnExportEventos) btnExportEventos.addEventListener("click", ()=>exportEventosCSV(renderState.historyLastRows || null));
+
+      const btnApplyFilters = $("#btnApplyFilters");
+      if (btnApplyFilters) btnApplyFilters.addEventListener("click", ()=>{
+        renderState.historyLimit = MAX_EVENTS_STEP;
+        renderHistorial();
+      });
+
+      ensureHistoryFooter();
+      if (ui.btnLoadMore){
+        ui.btnLoadMore.addEventListener("click", ()=>{
+          renderState.historyLimit += MAX_EVENTS_STEP;
+          renderHistorial();
+        });
+      }
+
+      const btnBackup = $("#btnBackup");
+      if (btnBackup) btnBackup.addEventListener("click", backupJSON);
 
       const filePicker = $("#filePicker");
-      $("#btnRestore").addEventListener("click", async ()=>{
-        const ok = await requirePinIfSet("Importar copia JSON está protegido por PIN (si está activo).");
-        if (!ok) return;
-        filePicker.value = "";
-        filePicker.click();
-      });
-      filePicker.addEventListener("change", async ()=>{
-        const file = filePicker.files && filePicker.files[0];
-        if (!file) return;
-        restoreJSON(file);
-      });
+      const btnRestore = $("#btnRestore");
+      if (btnRestore && filePicker){
+        btnRestore.addEventListener("click", async ()=>{
+          const ok = await requirePinIfSet("Importar copia JSON está protegido por PIN (si está activo).");
+          if (!ok) return;
+          filePicker.value = "";
+          filePicker.click();
+        });
+        filePicker.addEventListener("change", async ()=>{
+          const file = filePicker.files && filePicker.files[0];
+          if (!file) return;
+          restoreJSON(file);
+        });
+      }
 
-      $("#btnWipe").addEventListener("click", wipeAll);
+      const btnWipe = $("#btnWipe");
+      if (btnWipe) btnWipe.addEventListener("click", wipeAll);
 
-      $("#btnSetPin").addEventListener("click", setPinFlow);
-      $("#btnClearPin").addEventListener("click", clearPinFlow);
+      const btnSetPin = $("#btnSetPin");
+      if (btnSetPin) btnSetPin.addEventListener("click", setPinFlow);
+
+      const btnClearPin = $("#btnClearPin");
+      if (btnClearPin) btnClearPin.addEventListener("click", clearPinFlow);
 
       ui.tglGeo.addEventListener("change", ()=>{
         state.settings.geoEnabled = ui.tglGeo.checked;
@@ -1022,13 +1115,13 @@
         toast("📍", state.settings.geoEnabled ? "Geolocalización activada" : "Geolocalización desactivada");
       });
 
-      window.addEventListener("online", ()=>{ ui.uiOffline.hidden = true; });
-      window.addEventListener("offline", ()=>{ ui.uiOffline.hidden = false; });
+      window.addEventListener("online", ()=>{ if (ui.uiOffline) ui.uiOffline.hidden = true; });
+      window.addEventListener("offline", ()=>{ if (ui.uiOffline) ui.uiOffline.hidden = false; });
 
       renderAll();
       initSW();
 
-      // refresco suave para tiempos (sin render masivo agresivo)
+      // refresco suave para tiempos
       setInterval(()=>{
         const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
         if (active==="panel" || active==="resumen") renderAll();
