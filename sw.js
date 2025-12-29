@@ -1,4 +1,4 @@
-/* sw.js — ClockIn v1.0.0 */
+/* sw.js — ClockIn v1.0.0 (APP SHELL + SWR + SAFE UPDATE) */
 (() => {
   "use strict";
 
@@ -24,7 +24,7 @@
     e.waitUntil((async () => {
       const c = await caches.open(CACHE);
       await c.addAll(CORE);
-      // NO skipWaiting aquí para evitar comportamientos raros en iOS / loops
+      // No skipWaiting aquí: evitamos loops raros (iOS). Se activa vía postMessage.
     })());
   });
 
@@ -47,7 +47,7 @@
     const url = new URL(req.url);
     if (url.origin !== self.location.origin) return;
 
-    // Navegación: cache fallback si no hay red
+    // Navegación: network-first con fallback a cache (offline)
     if (req.mode === "navigate") {
       e.respondWith((async () => {
         try {
@@ -63,11 +63,16 @@
       return;
     }
 
-    // Stale-while-revalidate
+    // Stale-while-revalidate para assets
     e.respondWith((async () => {
       const c = await caches.open(CACHE);
       const cached = await c.match(req);
-      const net = fetch(req).then(res => { c.put(req, res.clone()).catch(() => {}); return res; }).catch(() => null);
+
+      const net = fetch(req).then(res => {
+        c.put(req, res.clone()).catch(() => {});
+        return res;
+      }).catch(() => null);
+
       return cached || (await net) || Response.error();
     })());
   });

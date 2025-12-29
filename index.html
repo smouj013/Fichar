@@ -50,6 +50,16 @@
 </head>
 
 <body>
+  <!-- Splash / Loading -->
+  <div class="splash" id="splash" aria-hidden="true">
+    <div class="splash-card">
+      <div class="splash-logo" aria-hidden="true">⏱️</div>
+      <div class="splash-title">ClockIn</div>
+      <div class="splash-sub" id="splashMsg">Cargando…</div>
+      <div class="splash-bar" aria-hidden="true"><span></span></div>
+    </div>
+  </div>
+
   <div class="bg-glow" aria-hidden="true"></div>
 
   <header class="topbar">
@@ -182,6 +192,7 @@
             <tbody></tbody>
           </table>
         </div>
+
         <div class="small muted" id="uiEventCount" style="margin-top:10px;"></div>
       </div>
     </section>
@@ -256,6 +267,10 @@
   </div>
 
   <input type="file" id="filePicker" accept="application/json" hidden />
+
+  <noscript>
+    <div style="padding:16px;color:#fff">Necesitas activar JavaScript para usar ClockIn.</div>
+  </noscript>
 
   <script src="app.js"></script>
 </body>

@@ -1,6 +1,10 @@
-/* app.js — ClockIn v1.0.0 (ESTABLE) */
+/* app.js — ClockIn v1.0.0 (ESTABLE + SPLASH + AUTO-UPDATE SAFE) */
 (() => {
   "use strict";
+
+  const g = (typeof globalThis !== "undefined") ? globalThis : window;
+  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V1000";
+  try { if (g && g[LOAD_GUARD]) return; if (g) g[LOAD_GUARD] = true; } catch (_) {}
 
   const VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "1.0.0");
   const STORAGE_KEY = "clockin_state_v1";
@@ -9,7 +13,6 @@
   const DOW_LABEL = { mon:"Lun", tue:"Mar", wed:"Mié", thu:"Jue", fri:"Vie", sat:"Sáb", sun:"Dom" };
 
   const MAX_EVENTS_STEP = 300;
-
   const CR = (typeof globalThis !== "undefined" && globalThis.crypto) ? globalThis.crypto : null;
 
   function $(sel, root=document){ return root.querySelector(sel); }
@@ -32,12 +35,24 @@
     return s;
   }
 
+  const ui = {};
+  const renderState = { historyLimit: MAX_EVENTS_STEP, historyLastRows: [] };
+  let state = null;
+
+  function splashSet(msg){
+    const el = $("#splashMsg");
+    if (el) el.textContent = msg || "Cargando…";
+  }
+  function splashHide(){
+    const s = $("#splash");
+    if (!s) return;
+    s.classList.add("is-hidden");
+    setTimeout(()=>{ s.style.display="none"; }, 380);
+  }
+
   function fatalScreen(title, details){
-    try {
-      const mb = document.getElementById("modalBackdrop");
-      if (mb) mb.hidden = true;
-    } catch(_) {}
-    try { document.body.style.overflow = "auto"; } catch(_) {}
+    try { closeModal(true); } catch(_) {}
+    try { splashHide(); } catch(_) {}
 
     const main = $(".main");
     if (!main) { alert(title + "\n\n" + details); return; }
@@ -71,8 +86,11 @@
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   }
   function prettyDateLong(ms){
-    try { return new Intl.DateTimeFormat("es-ES",{weekday:"long",year:"numeric",month:"long",day:"numeric"}).format(new Date(ms)); }
-    catch(_) { return dateKeyLocal(ms); }
+    try {
+      return new Intl.DateTimeFormat("es-ES",{weekday:"long",year:"numeric",month:"long",day:"numeric"}).format(new Date(ms));
+    } catch(_) {
+      return dateKeyLocal(ms);
+    }
   }
   function fmtDuration(ms){
     ms = Math.max(0, ms|0);
@@ -159,14 +177,12 @@
   function saveState(){
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
+    } catch (_) {
       toast("⛔", "No se pudo guardar", "El almacenamiento está bloqueado (modo privado/permisos).");
     }
   }
 
-  let state = null;
-
-  // ───────────────────────── Crypto helpers (PIN + Hash) ─────────────────────────
+  // ───────────────── Crypto helpers (PIN + Hash) ─────────────────
   function b64FromBuf(buf){
     const bytes = new Uint8Array(buf);
     let s = "";
@@ -226,9 +242,9 @@
     return sha256Hex(payload);
   }
 
-  // ───────────────────────── UI helpers ─────────────────────────
+  // ───────────────── UI helpers ─────────────────
   function toast(icon, msg, sub){
-    const zone = $("#toasts");
+    const zone = ui.toasts || $("#toasts");
     if (!zone) return;
     const el = document.createElement("div");
     el.className = "toast";
@@ -244,10 +260,17 @@
     setTimeout(()=>{ el.remove(); }, 2900);
   }
 
-  const modalBackdrop = () => $("#modalBackdrop");
-  const modalTitle = () => $("#modalTitle");
-  const modalBody = () => $("#modalBody");
-  const modalActions = () => $("#modalActions");
+  const modalBackdrop = () => ui.modalBackdrop || $("#modalBackdrop");
+  const modalTitle = () => ui.modalTitle || $("#modalTitle");
+  const modalBody = () => ui.modalBody || $("#modalBody");
+  const modalActions = () => ui.modalActions || $("#modalActions");
+
+  function lockBodyScroll(lock){
+    try {
+      if (lock) document.body.classList.add("modal-open");
+      else document.body.classList.remove("modal-open");
+    } catch(_) {}
+  }
 
   function mkBtn(label, cls, onClick){
     const b = document.createElement("button");
@@ -259,17 +282,32 @@
   }
 
   function openModal(title, bodyNode, actions){
+    // Limpieza defensiva para evitar “modal pillado”
+    try { modalBody().innerHTML = ""; modalActions().innerHTML = ""; } catch(_) {}
+
     modalTitle().textContent = title || "—";
-    modalBody().innerHTML = "";
     modalBody().appendChild(bodyNode);
-    modalActions().innerHTML = "";
+
     (actions||[]).forEach(a => modalActions().appendChild(a));
     const mb = modalBackdrop();
     if (mb) mb.hidden = false;
+
+    lockBodyScroll(true);
   }
-  function closeModal(){
+
+  function closeModal(force){
     const mb = modalBackdrop();
     if (mb) mb.hidden = true;
+    lockBodyScroll(false);
+
+    if (force) {
+      try { modalBody().innerHTML = ""; modalActions().innerHTML = ""; } catch(_) {}
+    }
+  }
+
+  function isModalOpen(){
+    const mb = modalBackdrop();
+    return mb && !mb.hidden;
   }
 
   function initialsFromName(name){
@@ -280,7 +318,7 @@
     return (a+b).toUpperCase();
   }
 
-  // ───────────────────────── Business logic ─────────────────────────
+  // ───────────────── Business logic ─────────────────
   function getEmployee(id){ return state.employees.find(e=>e.id===id) || null; }
 
   function eventsForEmpDay(empId, dayKey){
@@ -353,6 +391,7 @@
   async function getGeoIfEnabled(){
     if (!state.settings.geoEnabled) return null;
     if (!("geolocation" in navigator)) return null;
+
     return new Promise((resolve)=>{
       navigator.geolocation.getCurrentPosition(
         (pos)=>{
@@ -376,9 +415,9 @@
     `;
     const ta = $("#mNote", wrap);
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
-    const bNo = mkBtn("Guardar sin nota","btn btn-ghost", ()=>{ closeModal(); onOk(""); });
-    const bOk = mkBtn("Guardar","btn btn-primary", ()=>{ closeModal(); onOk(ta.value||""); });
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
+    const bNo = mkBtn("Guardar sin nota","btn btn-ghost", ()=>{ closeModal(true); onOk(""); });
+    const bOk = mkBtn("Guardar","btn btn-primary", ()=>{ closeModal(true); onOk(ta.value||""); });
 
     openModal(title, wrap, [bCancel,bNo,bOk]);
     setTimeout(()=>ta && ta.focus(),0);
@@ -406,7 +445,7 @@
     renderAll();
   }
 
-  // ───────────────────────── PIN ─────────────────────────
+  // ───────────────── PIN ─────────────────
   async function verifyPin(pin){
     const p = state.security.pin;
     if (!p) return true;
@@ -432,11 +471,11 @@
       `;
       const pin = $("#mPin", wrap);
 
-      const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>{ closeModal(); resolve(false); });
+      const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>{ closeModal(true); resolve(false); });
       const bOk = mkBtn("Verificar","btn btn-primary", async ()=>{
         const ok = await verifyPin(pin.value||"");
         if (!ok) { toast("⛔","PIN incorrecto"); return; }
-        closeModal();
+        closeModal(true);
         resolve(true);
       });
 
@@ -463,7 +502,7 @@
     const p1 = $("#p1", wrap);
     const p2 = $("#p2", wrap);
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
     const bOk = mkBtn("Guardar PIN","btn btn-primary", async ()=>{
       const a = (p1.value||"").trim();
       const b = (p2.value||"").trim();
@@ -478,7 +517,7 @@
         const hashB64 = await pbkdf2HashB64(a, saltB64, iter);
         state.security.pin = { saltB64, iter, hashB64 };
         saveState();
-        closeModal();
+        closeModal(true);
         toast("🔐","PIN guardado");
         renderAll();
       } catch (_) {
@@ -499,7 +538,7 @@
     renderAll();
   }
 
-  // ───────────────────────── Employees CRUD ─────────────────────────
+  // ───────────────── Employees CRUD ─────────────────
   function scheduleEditorNode(schedule){
     const sch = normalizeSchedule(schedule);
     const wrap = document.createElement("div");
@@ -589,7 +628,7 @@
     wrap.appendChild(nameField);
     wrap.appendChild(schNode);
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
     const bSave = mkBtn(isEdit ? "Guardar cambios" : "Crear empleado","btn btn-primary", ()=>{
       const name = (nameInput.value||"").trim();
       if (name.length<2) { toast("⚠️","Nombre demasiado corto"); return; }
@@ -602,7 +641,7 @@
         state.employees.push({ id: uid(), name, schedule, createdAt: now() });
       }
       saveState();
-      closeModal();
+      closeModal(true);
       toast("✅", isEdit ? "Empleado actualizado" : "Empleado creado", name);
       renderAll();
     });
@@ -621,12 +660,12 @@
     const wrap = document.createElement("div");
     wrap.innerHTML = `<div class="muted">Se borrará <b>${escapeHtml(emp.name)}</b> y todos sus eventos.</div>`;
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
     const bDel = mkBtn("Borrar","btn btn-danger", ()=>{
       state.employees = state.employees.filter(e=>e.id!==empId);
       state.events = state.events.filter(ev=>ev.empId!==empId);
       saveState();
-      closeModal();
+      closeModal(true);
       toast("🗑️","Empleado borrado", emp.name);
       renderAll();
     });
@@ -634,7 +673,7 @@
     openModal("Confirmar borrado", wrap, [bCancel,bDel]);
   }
 
-  // ───────────────────────── Export / Backup / Restore / Wipe ─────────────────────────
+  // ───────────────── Export / Backup / Restore / Wipe ─────────────────
   function downloadText(filename, text, mime){
     const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -719,11 +758,11 @@
 
     const wrap = document.createElement("div");
     wrap.innerHTML = `<div class="muted">Vas a reemplazar los datos actuales por la copia importada.</div>`;
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
     const bOk = mkBtn("Importar","btn btn-primary", ()=>{
       state = normalizeState(parsed);
       saveState();
-      closeModal();
+      closeModal(true);
       toast("✅","Copia importada");
       renderAll();
     });
@@ -736,52 +775,18 @@
 
     const wrap = document.createElement("div");
     wrap.innerHTML = `<div class="muted">Esto borrará empleados, horarios y eventos (solo en este dispositivo).</div>`;
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
     const bOk = mkBtn("Borrar todo","btn btn-danger", ()=>{
       try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
-      closeModal();
+      closeModal(true);
       location.reload();
     });
     openModal("Confirmar borrado total", wrap, [bCancel,bOk]);
   }
 
-  // ───────────────────────── Rendering + Routing ─────────────────────────
-  const ui = {};
-  const renderState = { historyLimit: MAX_EVENTS_STEP, historyLastRows: [] };
-
-  function ensureHistoryFooter(){
-    const hist = $("#view-historial");
-    if (!hist) return;
-
-    // Si ya existe en HTML, perfecto.
-    let count = $("#uiEventCount", hist);
-    let load = $("#btnLoadMore", hist);
-
-    // Si falta, lo creamos dentro del último card del historial.
-    if (!count || !load){
-      let footer = $("#historyFooter", hist);
-      if (!footer){
-        footer = document.createElement("div");
-        footer.id = "historyFooter";
-        footer.className = "row row-between";
-        footer.style.marginTop = "12px";
-        footer.innerHTML = `
-          <span class="badge badge-soft" id="uiEventCount">—</span>
-          <button class="btn btn-ghost" id="btnLoadMore" hidden>Cargar más</button>
-        `;
-        const cards = $$(".card", hist);
-        const target = cards.length ? cards[cards.length - 1] : hist;
-        target.appendChild(footer);
-      }
-      count = $("#uiEventCount", hist);
-      load = $("#btnLoadMore", hist);
-    }
-
-    ui.uiEventCount = count || null;
-    ui.btnLoadMore = load || null;
-  }
-
+  // ───────────────── Routing / Render ─────────────────
   function setRoute(route){
+    closeModal(true); // ✅ evita modales “pillados” al navegar
     $$(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.route===route));
     $$(".view").forEach(v => v.hidden = (v.dataset.route!==route));
     renderAll();
@@ -906,7 +911,6 @@
   }
 
   function renderHistorial(){
-    ensureHistoryFooter();
     fillEmpFilter();
 
     const allRows = filterEvents();
@@ -932,8 +936,8 @@
       ui.eventsBody.appendChild(tr);
     }
 
-    if (ui.uiEventCount) ui.uiEventCount.textContent = `Mostrando ${rows.length} de ${allRows.length} evento(s).`;
-    if (ui.btnLoadMore) ui.btnLoadMore.hidden = (allRows.length <= limit);
+    ui.uiEventCount.textContent = `Mostrando ${rows.length} de ${allRows.length} evento(s).`;
+    ui.btnLoadMore.hidden = (allRows.length <= limit);
   }
 
   function renderAjustes(){
@@ -965,8 +969,8 @@
   }
 
   function renderAll(){
-    if (ui.uiDate) ui.uiDate.textContent = prettyDateLong(now());
-    if (ui.uiOffline) ui.uiOffline.hidden = navigator.onLine;
+    ui.uiDate.textContent = prettyDateLong(now());
+    ui.uiOffline.hidden = navigator.onLine;
 
     const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
     if (active==="panel") renderPanel();
@@ -975,40 +979,71 @@
     if (active==="ajustes") renderAjustes();
   }
 
-  // ───────────────────────── Service Worker (update pill sin bucles) ─────────────────────────
+  // ───────────────── Service Worker (AUTO UPDATE SAFE) ─────────────────
+  function isSafeToAutoReload(){
+    if (isModalOpen()) return false;
+    const ae = document.activeElement;
+    if (!ae) return true;
+    const tag = (ae.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return false;
+    return true;
+  }
+
   async function initSW(){
     if (!("serviceWorker" in navigator)) return;
-    if (!ui.btnUpdate) return;
-
     const btn = ui.btnUpdate;
+    if (!btn) return;
+
     try {
       const reg = await navigator.serviceWorker.register("./sw.js");
-      if (reg.waiting) btn.hidden = false;
+
+      const tryApplyWaiting = async () => {
+        if (!reg.waiting) return;
+        btn.hidden = false;
+
+        // Auto-aplica si es seguro (sin modal / sin escribir)
+        if (isSafeToAutoReload()) {
+          toast("♻️", "Actualizando…", "Aplicando la nueva versión.");
+          try { reg.waiting.postMessage({type:"SKIP_WAITING"}); } catch(_) {}
+          setTimeout(()=>location.reload(), 350);
+        }
+      };
+
+      // Si ya hay waiting al entrar
+      await tryApplyWaiting();
 
       reg.addEventListener("updatefound", ()=>{
         const inst = reg.installing;
         if (!inst) return;
         inst.addEventListener("statechange", ()=>{
-          if (inst.state==="installed" && navigator.serviceWorker.controller) btn.hidden = false;
+          if (inst.state==="installed" && navigator.serviceWorker.controller) {
+            // Hay update listo
+            tryApplyWaiting();
+          }
         });
       });
 
+      // Botón update manual (por si no era seguro auto)
       btn.addEventListener("click", ()=>{
         try {
           btn.disabled = true;
           if (reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
-          setTimeout(()=>location.reload(), 250);
+          setTimeout(()=>location.reload(), 300);
         } catch(_) {
           btn.disabled = false;
         }
       });
-    } catch(_) {}
+
+    } catch (_) {}
   }
 
-  // ───────────────────────── Boot ─────────────────────────
+  // ───────────────── Boot ─────────────────
   document.addEventListener("DOMContentLoaded", () => {
     try {
-      // cache UI refs (requeridos)
+      splashSet("Inicializando…");
+
+      ui.toasts = $("#toasts");
+
       ui.uiDate = $("#uiDate");
       ui.uiCounts = $("#uiCounts");
       ui.uiOffline = $("#uiOffline");
@@ -1027,8 +1062,18 @@
       ui.btnUpdate = $("#btnUpdate");
       ui.tglGeo = $("#tglGeo");
 
-      // Validación mínima para NO quedarse pillado
+      ui.btnLoadMore = $("#btnLoadMore");
+      ui.uiEventCount = $("#uiEventCount");
+
+      ui.modalBackdrop = $("#modalBackdrop");
+      ui.modalTitle = $("#modalTitle");
+      ui.modalBody = $("#modalBody");
+      ui.modalActions = $("#modalActions");
+
       const required = [
+        ["#uiDate", ui.uiDate],
+        ["#uiCounts", ui.uiCounts],
+        ["#uiOffline", ui.uiOffline],
         ["#employeeList", ui.employeeList],
         ["#employeeAdminList", ui.employeeAdminList],
         ["#summaryTable tbody", ui.summaryBody],
@@ -1036,25 +1081,32 @@
         ["#fEmp", ui.fEmp],
         ["#fFrom", ui.fFrom],
         ["#fTo", ui.fTo],
+        ["#btnLoadMore", ui.btnLoadMore],
+        ["#uiEventCount", ui.uiEventCount],
         ["#tglGeo", ui.tglGeo],
+        ["#modalBackdrop", ui.modalBackdrop],
+        ["#modalTitle", ui.modalTitle],
+        ["#modalBody", ui.modalBody],
+        ["#modalActions", ui.modalActions]
       ];
       for (const [sel, el] of required){
         if (!el) throw new Error(`Falta el elemento ${sel} en index.html (ID/estructura incorrecta).`);
       }
 
-      // modal events
+      // Modal close handlers (anti “pillado”)
       const mClose = $("#modalClose");
-      const mBack = $("#modalBackdrop");
-      if (mClose) mClose.addEventListener("click", closeModal);
-      if (mBack) mBack.addEventListener("click", (e)=>{ if (e.target===mBack) closeModal(); });
+      if (mClose) mClose.addEventListener("click", ()=>closeModal(true));
+      ui.modalBackdrop.addEventListener("click", (e)=>{ if (e.target === ui.modalBackdrop) closeModal(true); });
+      window.addEventListener("keydown", (e)=>{ if (e.key === "Escape" && isModalOpen()) closeModal(true); });
 
       // state
+      splashSet("Cargando datos…");
       state = loadState();
 
       // tabs
       $$(".tab").forEach(btn => btn.addEventListener("click", ()=>setRoute(btn.dataset.route)));
 
-      // actions (con guards)
+      // actions
       const btnQuickAdd = $("#btnQuickAdd");
       if (btnQuickAdd) btnQuickAdd.addEventListener("click", ()=>addOrEditEmployeeFlow(null));
 
@@ -1073,13 +1125,10 @@
         renderHistorial();
       });
 
-      ensureHistoryFooter();
-      if (ui.btnLoadMore){
-        ui.btnLoadMore.addEventListener("click", ()=>{
-          renderState.historyLimit += MAX_EVENTS_STEP;
-          renderHistorial();
-        });
-      }
+      ui.btnLoadMore.addEventListener("click", ()=>{
+        renderState.historyLimit += MAX_EVENTS_STEP;
+        renderHistorial();
+      });
 
       const btnBackup = $("#btnBackup");
       if (btnBackup) btnBackup.addEventListener("click", backupJSON);
@@ -1115,9 +1164,10 @@
         toast("📍", state.settings.geoEnabled ? "Geolocalización activada" : "Geolocalización desactivada");
       });
 
-      window.addEventListener("online", ()=>{ if (ui.uiOffline) ui.uiOffline.hidden = true; });
-      window.addEventListener("offline", ()=>{ if (ui.uiOffline) ui.uiOffline.hidden = false; });
+      window.addEventListener("online", ()=>{ ui.uiOffline.hidden = true; });
+      window.addEventListener("offline", ()=>{ ui.uiOffline.hidden = false; });
 
+      splashSet("Listo");
       renderAll();
       initSW();
 
@@ -1126,6 +1176,9 @@
         const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
         if (active==="panel" || active==="resumen") renderAll();
       }, 15000);
+
+      // ✅ ocultar splash al final (siempre)
+      setTimeout(splashHide, 260);
 
     } catch (e) {
       console.error(e);
