@@ -718,7 +718,7 @@
         state.settings.pinSalt = salt;
         state.settings.pinHash = hash;
       } else if (!state.settings.pinHash) {
-        alert("Activas PIN, pero no has puesto un PIN válido (4–10 dígitos).”);
+        alert("Activas PIN, pero no has puesto un PIN válido (4–10 dígitos).");
         return;
       }
     } else {
