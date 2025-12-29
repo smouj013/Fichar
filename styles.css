@@ -1,10 +1,8 @@
-/* styles.css — ClockIn v2.0.3 (CROSS-BROWSER UI PRO + COLOR VARS FIX) */
+/* styles.css — ClockIn v2.0.4 (CROSS-BROWSER UI PRO + COLOR VARS FIX + SETTINGS/PANEL READY)
+   ✅ RGB con comas para rgba(var(--x), a) (compat total)
+   ✅ Fixes: focus rings, selects/date inputs, tables, pills states, modals, splash, accessibility
+*/
 
-/* =========================================================
-   ✅ CLAVE CROSS-BROWSER:
-   Usa RGB con comas para rgba(var(--x), a)
-   (Opera GX/Chromium/Safari lo soportan perfecto)
-========================================================= */
 :root{
   --radius-xl: 18px;
   --radius-lg: 14px;
@@ -31,9 +29,10 @@
   --warn: 255, 193, 82;
   --ok: 110, 244, 181;
 
-  /* Paleta base (dark) */
+  /* Base (dark) */
   --bg: #0b0b10;
   --bg2: #090914;
+
   --panel: rgba(255,255,255,.06);
   --panel-2: rgba(255,255,255,.08);
   --panel-3: rgba(255,255,255,.10);
@@ -47,8 +46,11 @@
 
   --focus: rgba(var(--acc2), .55);
   --ring: 0 0 0 4px rgba(var(--acc2), .18);
+
+  --tap: rgba(255,255,255,.10);
 }
 
+/* Light theme */
 :root[data-theme="light"]{
   --bg: #f6f7fb;
   --bg2: #eef1f8;
@@ -67,6 +69,8 @@
   --shadow-1: 0 10px 30px rgba(10,12,18,.12);
   --shadow-2: 0 14px 44px rgba(10,12,18,.18);
   --shadow-inset: inset 0 1px 0 rgba(255,255,255,.55);
+
+  --tap: rgba(10,12,18,.08);
 }
 
 *{ box-sizing:border-box; }
@@ -76,15 +80,22 @@ body{
   margin:0;
   font-family: var(--font);
   color: var(--text);
-  background: radial-gradient(1200px 900px at 20% -10%, rgba(var(--acc2),.10), transparent 60%),
-              radial-gradient(900px 700px at 90% 0%, rgba(var(--acc),.08), transparent 55%),
-              linear-gradient(180deg, var(--bg), var(--bg2));
+  background:
+    radial-gradient(1200px 900px at 20% -10%, rgba(var(--acc2),.10), transparent 60%),
+    radial-gradient(900px 700px at 90% 0%, rgba(var(--acc),.08), transparent 55%),
+    linear-gradient(180deg, var(--bg), var(--bg2));
   overflow-x: hidden;
 }
 
-/* ✅ hidden real */
+/* ✅ hidden real (crítico overlays) */
 [hidden]{ display:none !important; }
 #modalBackdrop[hidden]{ display:none !important; }
+
+a{ color: inherit; text-decoration: none; }
+button, input, select, textarea{ font: inherit; color: inherit; }
+button{ border: 0; background: none; }
+:focus{ outline: none; }
+:focus-visible{ outline: none; }
 
 /* Scrollbar (desktop) */
 @media (pointer:fine){
@@ -109,7 +120,7 @@ body{
   vertical-align: middle;
 }
 
-/* ───────── Background glow (bonito + estable) ───────── */
+/* ───────── Background glow ───────── */
 .bg-glow{
   position: fixed;
   inset: 0;
@@ -171,8 +182,6 @@ body::before{
 :root[data-theme="light"] .topbar{
   background: linear-gradient(to bottom, rgba(255,255,255,.85), rgba(255,255,255,0));
 }
-
-/* Backdrop-filter solo si existe */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))){
   .topbar{ backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 }
@@ -246,6 +255,7 @@ body::before{
               color var(--t) var(--ease-out);
   user-select:none;
   white-space:nowrap;
+  -webkit-tap-highlight-color: transparent;
 }
 .tab:hover{ transform: translateY(-1px); border-color: var(--border-2); color: var(--text); }
 .tab:active{ transform: translateY(0px) scale(.98); }
@@ -257,7 +267,7 @@ body::before{
   box-shadow: 0 10px 26px rgba(var(--acc2),.18);
 }
 :root[data-theme="light"] .tab.is-active{
-  color: rgba(255,255,255,.96); /* en light el gradiente sigue, texto blanco queda bien */
+  color: rgba(255,255,255,.96);
 }
 
 .main{
@@ -266,7 +276,7 @@ body::before{
   margin: 0 auto;
 }
 
-/* Views (tu app usa hidden, esto solo anima cuando aparece) */
+/* Views */
 .view{ transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out); }
 .view.view-enter{ opacity:0; transform: translateY(10px); }
 .view.view-enter.is-entering{ opacity:1; transform: translateY(0); }
@@ -283,6 +293,7 @@ body::before{
 .section-head h1{ margin:0; font-size: 22px; letter-spacing:.2px; }
 .section-meta{ display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
 
+/* Badges */
 .badge{
   display:inline-flex;
   align-items:center;
@@ -297,6 +308,7 @@ body::before{
 }
 .badge-soft{ background: rgba(255,255,255,.05); }
 
+/* Hint */
 .hint{
   display:flex;
   gap: 10px;
@@ -324,9 +336,7 @@ body::before{
   box-shadow: var(--shadow-1);
   padding: 14px;
 }
-:root[data-theme="light"] .card{
-  background: rgba(255,255,255,.72);
-}
+:root[data-theme="light"] .card{ background: rgba(255,255,255,.72); }
 .card + .card{ margin-top: 14px; }
 .card-title{
   font-weight: 900;
@@ -347,8 +357,10 @@ body::before{
 .row{ display:flex; gap: 10px; align-items:center; flex-wrap: wrap; }
 .row-between{ justify-content: space-between; }
 
+/* Fields */
 .field{ display:grid; gap: 8px; }
 .field > span{ font-weight: 900; font-size: 12px; color: var(--muted); letter-spacing:.2px; }
+
 .field input, .field select, .field textarea{
   width: 100%;
   border-radius: 12px;
@@ -357,15 +369,58 @@ body::before{
   color: var(--text);
   padding: 10px 12px;
   outline: none;
+  box-shadow: none;
+  appearance: none;
 }
+
+/* Select caret (cross-browser) */
+.field select{
+  padding-right: 40px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(255,255,255,.60) 50%),
+    linear-gradient(135deg, rgba(255,255,255,.60) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 12px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+:root[data-theme="light"] .field select{
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(10,12,18,.55) 50%),
+    linear-gradient(135deg, rgba(10,12,18,.55) 50%, transparent 50%);
+}
+
 :root[data-theme="light"] .field input,
 :root[data-theme="light"] .field select,
 :root[data-theme="light"] .field textarea{ background: rgba(10,12,18,.05); }
+
 .field textarea{ min-height: 92px; resize: vertical; }
+
 .field input:focus, .field select:focus, .field textarea:focus{
   border-color: var(--focus);
   background: rgba(255,255,255,.09);
   box-shadow: var(--ring);
+}
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible{
+  border-color: var(--focus);
+  box-shadow: var(--ring);
+}
+
+/* Date inputs (mejor en Safari/Chromium) */
+input[type="date"]{
+  min-height: 42px;
+}
+input[type="date"]::-webkit-calendar-picker-indicator{
+  opacity: .85;
+  cursor: pointer;
+  filter: invert(1);
+}
+:root[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator{
+  filter: invert(0);
 }
 
 /* Toggle */
@@ -379,6 +434,7 @@ body::before{
   margin:0;
   cursor:pointer;
 }
+.toggle input:focus-visible{ box-shadow: var(--ring); border-color: var(--focus); }
 .toggle .slider{
   pointer-events:none;
   position:absolute;
@@ -410,12 +466,19 @@ body::before{
   display:inline-flex;
   align-items:center;
   gap: 8px;
-  transition: transform var(--t-fast) var(--ease-out), border-color var(--t) var(--ease-out), background var(--t) var(--ease-out);
+  transition: transform var(--t-fast) var(--ease-out),
+              border-color var(--t) var(--ease-out),
+              background var(--t) var(--ease-out);
   box-shadow: var(--shadow-inset);
 }
 .btn:hover{ border-color: var(--border-2); transform: translateY(-1px); background: rgba(255,255,255,.08); }
 .btn:active{ transform: translateY(0px) scale(.98); }
 .btn:disabled{ opacity:.55; cursor:not-allowed; transform:none; }
+
+.btn:focus-visible{
+  border-color: var(--focus);
+  box-shadow: var(--ring);
+}
 
 .btn-primary{
   border: 1px solid rgba(var(--acc), .60);
@@ -438,11 +501,14 @@ body::before{
   display:grid; place-items:center;
   color: var(--text);
   cursor:pointer;
-  transition: transform var(--t-fast) var(--ease-out), border-color var(--t) var(--ease-out), background var(--t) var(--ease-out);
+  transition: transform var(--t-fast) var(--ease-out),
+              border-color var(--t) var(--ease-out),
+              background var(--t) var(--ease-out);
   box-shadow: var(--shadow-inset);
 }
 .iconbtn:hover{ transform: translateY(-1px); border-color: var(--border-2); background: rgba(255,255,255,.08); }
 .iconbtn:active{ transform: translateY(0) scale(.98); }
+.iconbtn:focus-visible{ border-color: var(--focus); box-shadow: var(--ring); }
 
 .pill{
   display:inline-flex;
@@ -476,6 +542,7 @@ body::before{
   font-weight: 900;
   font-size: 13px;
 }
+.datepill:focus-visible{ border-color: var(--focus); box-shadow: var(--ring); }
 
 /* Employees */
 .list{ display:grid; gap: 12px; }
@@ -490,9 +557,8 @@ body::before{
   justify-content:space-between;
   gap: 12px;
 }
-:root[data-theme="light"] .emp{
-  background: rgba(255,255,255,.70);
-}
+:root[data-theme="light"] .emp{ background: rgba(255,255,255,.70); }
+
 .emp-left{ display:flex; align-items:center; gap: 12px; min-width: 0; }
 .avatar{
   width: 44px; height: 44px;
@@ -536,6 +602,7 @@ body.compact .pill{ padding: 7px 10px; }
   border-bottom: 1px solid rgba(255,255,255,.06);
   font-size: 13px;
   color: var(--text);
+  vertical-align: top;
 }
 :root[data-theme="light"] .table td{ border-bottom: 1px solid rgba(10,12,18,.08); }
 
@@ -722,4 +789,19 @@ body.modal-open{ overflow: hidden; }
   .main{ padding: 14px 12px 92px; }
   .emp{ padding: 12px; }
   .btn{ padding: 10px 10px; }
+}
+
+/* High contrast / forced colors */
+@media (forced-colors: active){
+  .bg-glow, body::before{ display:none !important; }
+  .card, .emp, .modal, .toast, .tabs, .topbar{ forced-color-adjust:auto; }
+}
+
+/* Small helpers (si tu app los usa en HTML) */
+hr{
+  border: 0;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+:root[data-theme="light"] hr{
+  border-top: 1px solid rgba(10,12,18,.10);
 }
