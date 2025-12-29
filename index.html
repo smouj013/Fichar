@@ -10,8 +10,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="ClockIn" />
+  <meta name="application-name" content="ClockIn" />
 
-  <meta name="description" content="ClockIn — app PWA de fichaje con múltiples empleados, horarios semanales, resumen diario, historial, export CSV, PIN y modo offline." />
+  <meta name="description" content="ClockIn — PWA de fichaje: empleados, entrada/salida, pausas, resumen, historial, exportación CSV, PIN y offline." />
 
   <title>ClockIn</title>
 
@@ -21,9 +22,14 @@
   <link rel="apple-touch-icon" sizes="167x167" href="assets/icons/apple-touch-icon-167.png" />
   <link rel="apple-touch-icon" sizes="152x152" href="assets/icons/apple-touch-icon-152.png" />
 
-  <script>window.APP_VERSION = "1.0.0";</script>
+  <!-- Fonts + Material Symbols -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,650,0,0&display=swap" rel="stylesheet" />
 
-  <!-- Repair mode: /?repair -->
+  <script>window.APP_VERSION = "2.0.0";</script>
+
+  <!-- Repair mode: /?repair (limpia SW + caches) -->
   <script>
     (function () {
       const qs = new URLSearchParams(location.search);
@@ -53,10 +59,22 @@
   <!-- Splash / Loading -->
   <div class="splash" id="splash" aria-hidden="true">
     <div class="splash-card">
-      <div class="splash-logo" aria-hidden="true">⏱️</div>
+      <div class="splash-logo" aria-hidden="true">
+        <span class="ms">schedule</span>
+      </div>
       <div class="splash-title">ClockIn</div>
       <div class="splash-sub" id="splashMsg">Cargando…</div>
       <div class="splash-bar" aria-hidden="true"><span></span></div>
+      <div class="splash-foot">v<span id="splashVer">2.0.0</span></div>
+
+      <!-- Watchdog (si JS no arranca o SW está pillado) -->
+      <div id="splashHelp" class="small muted" style="margin-top:10px; display:none;">
+        Si esto se queda cargando, entra en <b>Repair</b> para limpiar caché/SW.
+        <div class="row" style="justify-content:center; margin-top:10px;">
+          <a class="btn btn-ghost" href="./?repair"><span class="ms">construction</span> Repair</a>
+          <button class="btn btn-primary" id="btnForceHideSplash" type="button"><span class="ms">visibility</span> Mostrar UI</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -64,7 +82,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <div class="logo" aria-hidden="true">⏱️</div>
+      <div class="logo" aria-hidden="true"><span class="ms">schedule</span></div>
       <div class="brand-txt">
         <div class="brand-title">ClockIn</div>
         <div class="brand-sub" id="uiDate">—</div>
@@ -73,34 +91,48 @@
 
     <div class="top-actions">
       <button class="pill pill-update" id="btnUpdate" hidden title="Actualizar">
-        Actualización disponible
+        <span class="ms">system_update</span>
+        Actualización
       </button>
-      <button class="iconbtn" id="btnQuickAdd" title="Añadir empleado" aria-label="Añadir empleado">＋</button>
+
+      <button class="iconbtn" id="btnQuickAdd" title="Añadir empleado" aria-label="Añadir empleado" type="button">
+        <span class="ms">person_add</span>
+      </button>
     </div>
   </header>
 
   <nav class="tabs" role="navigation" aria-label="Navegación">
-    <button class="tab is-active" data-route="panel">Panel</button>
-    <button class="tab" data-route="resumen">Resumen</button>
-    <button class="tab" data-route="historial">Historial</button>
-    <button class="tab" data-route="ajustes">Ajustes</button>
+    <button class="tab is-active" data-route="panel" type="button">
+      <span class="ms">dashboard</span> Panel
+    </button>
+    <button class="tab" data-route="resumen" type="button">
+      <span class="ms">analytics</span> Resumen
+    </button>
+    <button class="tab" data-route="historial" type="button">
+      <span class="ms">history</span> Historial
+    </button>
+    <button class="tab" data-route="ajustes" type="button">
+      <span class="ms">settings</span> Ajustes
+    </button>
   </nav>
 
-  <main class="main">
+  <main class="main" id="appMain">
     <!-- PANEL -->
     <section class="view" id="view-panel" data-route="panel">
       <div class="section-head">
-        <h1>Empleados de hoy</h1>
+        <h1>Empleados</h1>
         <div class="section-meta">
           <span class="badge" id="uiCounts">—</span>
-          <span class="badge badge-soft" id="uiOffline" hidden>Offline</span>
+          <span class="badge badge-soft" id="uiOffline" hidden>
+            <span class="ms">cloud_off</span> Offline
+          </span>
         </div>
       </div>
 
       <div class="hint">
         <span class="dot"></span>
         <div>
-          Botón <b>Entrada/Salida</b> para fichar. Botón <b>Pausa</b> para inicio/fin de descanso.
+          Usa <b>Entrada/Salida</b> y <b>Pausa</b>. Todo queda guardado en el dispositivo.
         </div>
       </div>
 
@@ -110,14 +142,21 @@
     <!-- RESUMEN -->
     <section class="view" id="view-resumen" data-route="resumen" hidden>
       <div class="section-head">
-        <h1>Resumen diario</h1>
+        <h1>Resumen</h1>
         <div class="section-meta">
-          <button class="btn" id="btnExportResumen">Exportar resumen CSV</button>
+          <div class="row">
+            <button class="btn btn-ghost" id="btnSumPrev" title="Día anterior" type="button"><span class="ms">chevron_left</span></button>
+            <input class="datepill" id="sumDate" type="date" />
+            <button class="btn btn-ghost" id="btnSumNext" title="Día siguiente" type="button"><span class="ms">chevron_right</span></button>
+          </div>
+          <button class="btn" id="btnExportResumen" type="button">
+            <span class="ms">download</span> CSV
+          </button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Hoy</div>
+        <div class="card-title">Detalle</div>
         <div class="table-wrap">
           <table class="table" id="summaryTable">
             <thead>
@@ -142,7 +181,9 @@
       <div class="section-head">
         <h1>Historial</h1>
         <div class="section-meta">
-          <button class="btn" id="btnExportEventos">Exportar eventos CSV</button>
+          <button class="btn" id="btnExportEventos" type="button">
+            <span class="ms">download</span> CSV
+          </button>
         </div>
       </div>
 
@@ -165,7 +206,10 @@
 
           <div class="field actions">
             <span>&nbsp;</span>
-            <button class="btn" id="btnApplyFilters">Aplicar</button>
+            <div class="row">
+              <button class="btn" id="btnApplyFilters" type="button"><span class="ms">filter_alt</span> Aplicar</button>
+              <button class="btn btn-ghost" id="btnClearFilters" title="Limpiar" type="button"><span class="ms">filter_alt_off</span></button>
+            </div>
           </div>
         </div>
       </div>
@@ -173,7 +217,7 @@
       <div class="card">
         <div class="row row-between" style="margin-bottom:10px;">
           <div class="card-title" style="margin:0;">Eventos</div>
-          <button class="btn btn-ghost" id="btnLoadMore" hidden>Cargar más</button>
+          <button class="btn btn-ghost" id="btnLoadMore" hidden type="button"><span class="ms">expand_more</span> Cargar más</button>
         </div>
 
         <div class="table-wrap">
@@ -204,15 +248,83 @@
       </div>
 
       <div class="card">
+        <div class="card-title">General</div>
+        <div class="grid grid-2">
+          <label class="field">
+            <span>Tema</span>
+            <select id="optTheme">
+              <option value="system">Sistema</option>
+              <option value="dark">Oscuro</option>
+              <option value="light">Claro</option>
+            </select>
+            <small class="muted">Se aplica al instante.</small>
+          </label>
+
+          <label class="field">
+            <span>Auto-actualizar</span>
+            <div class="row">
+              <label class="toggle">
+                <input type="checkbox" id="optAutoUpdate" />
+                <span class="slider"></span>
+              </label>
+              <span class="muted">Aplica updates en cuanto están listos.</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Confirmar acciones</span>
+            <div class="row">
+              <label class="toggle">
+                <input type="checkbox" id="optConfirmActions" />
+                <span class="slider"></span>
+              </label>
+              <span class="muted">Pide confirmación antes de fichar.</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Notas al fichar</span>
+            <select id="optNoteMode">
+              <option value="ask">Preguntar (recomendado)</option>
+              <option value="never">Nunca</option>
+            </select>
+            <small class="muted">Puedes añadir notas en Historial cuando quieras.</small>
+          </label>
+
+          <label class="field">
+            <span>Modo compacto</span>
+            <div class="row">
+              <label class="toggle">
+                <input type="checkbox" id="optCompact" />
+                <span class="slider"></span>
+              </label>
+              <span class="muted">Más info en menos espacio.</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Vibración (móvil)</span>
+            <div class="row">
+              <label class="toggle">
+                <input type="checkbox" id="optHaptics" />
+                <span class="slider"></span>
+              </label>
+              <span class="muted">Feedback al fichar (si se puede).</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title">Seguridad</div>
         <div class="grid">
           <label class="field">
             <span>PIN (opcional)</span>
             <div class="row">
-              <button class="btn" id="btnSetPin">Configurar/Modificar PIN</button>
-              <button class="btn btn-ghost" id="btnClearPin">Quitar PIN</button>
+              <button class="btn" id="btnSetPin" type="button"><span class="ms">lock</span> Configurar</button>
+              <button class="btn btn-ghost" id="btnClearPin" type="button"><span class="ms">lock_open</span> Quitar</button>
             </div>
-            <small class="muted">Protege exportaciones y borrados.</small>
+            <small class="muted">Protege exportaciones/importaciones y borrados.</small>
           </label>
 
           <label class="field">
@@ -222,7 +334,7 @@
                 <input type="checkbox" id="tglGeo" />
                 <span class="slider"></span>
               </label>
-              <span class="muted">Guardar coordenadas aproximadas al fichar (3 decimales).</span>
+              <span class="muted">Guarda coordenadas aprox. al fichar.</span>
             </div>
           </label>
         </div>
@@ -231,8 +343,8 @@
       <div class="card">
         <div class="card-title">Empleados</div>
         <div class="row row-between">
-          <div class="muted">Gestiona empleados y su horario semanal.</div>
-          <button class="btn" id="btnAddEmp">Añadir empleado</button>
+          <div class="muted">Gestiona empleados y horario semanal.</div>
+          <button class="btn" id="btnAddEmp" type="button"><span class="ms">person_add</span> Añadir</button>
         </div>
         <div class="list" id="employeeAdminList"></div>
       </div>
@@ -240,11 +352,16 @@
       <div class="card">
         <div class="card-title">Datos</div>
         <div class="row">
-          <button class="btn btn-ghost" id="btnBackup">Exportar copia (JSON)</button>
-          <button class="btn btn-ghost" id="btnRestore">Importar copia (JSON)</button>
-          <button class="btn btn-danger" id="btnWipe">Borrar todo</button>
+          <button class="btn btn-ghost" id="btnBackup" type="button"><span class="ms">file_download</span> Backup JSON</button>
+          <button class="btn btn-ghost" id="btnRestore" type="button"><span class="ms">file_upload</span> Importar JSON</button>
+          <button class="btn btn-danger" id="btnWipe" type="button"><span class="ms">delete_forever</span> Borrar todo</button>
         </div>
-        <small class="muted">La copia JSON incluye empleados, horarios y eventos.</small>
+        <div class="row" style="margin-top:10px;">
+          <a class="btn btn-ghost" href="./?repair" title="Reparar caché/SW si una actualización se quedó atascada">
+            <span class="ms">construction</span> Repair caché/SW
+          </a>
+        </div>
+        <small class="muted">Backup incluye empleados, horarios y eventos.</small>
       </div>
 
       <div class="footer">
@@ -253,13 +370,19 @@
     </section>
   </main>
 
+  <button class="fab" id="fabAdd" aria-label="Añadir empleado" title="Añadir empleado" type="button">
+    <span class="ms">add</span>
+  </button>
+
   <div class="toast-zone" id="toasts" aria-live="polite" aria-relevant="additions"></div>
 
   <div class="modal-backdrop" id="modalBackdrop" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-head">
         <div class="modal-title" id="modalTitle">—</div>
-        <button class="iconbtn" id="modalClose" aria-label="Cerrar">✕</button>
+        <button class="iconbtn" id="modalClose" aria-label="Cerrar" type="button">
+          <span class="ms">close</span>
+        </button>
       </div>
       <div class="modal-body" id="modalBody"></div>
       <div class="modal-actions" id="modalActions"></div>
@@ -269,8 +392,31 @@
   <input type="file" id="filePicker" accept="application/json" hidden />
 
   <noscript>
-    <div style="padding:16px;color:#fff">Necesitas activar JavaScript para usar ClockIn.</div>
+    <div style="padding:16px; color:#fff; background:#111; font-family:system-ui">
+      Esta app necesita JavaScript activado.
+    </div>
   </noscript>
+
+  <!-- Watchdog: si el SW te sirve algo viejo o el JS peta, te deja salir del splash -->
+  <script>
+    (function(){
+      const help = document.getElementById("splashHelp");
+      const splash = document.getElementById("splash");
+      const btn = document.getElementById("btnForceHideSplash");
+      const showHelp = () => { if (help) help.style.display = "block"; };
+      setTimeout(() => {
+        if (!splash) return;
+        if (getComputedStyle(splash).display !== "none") showHelp();
+      }, 2500);
+
+      if (btn && splash){
+        btn.addEventListener("click", () => {
+          splash.classList.add("is-hidden");
+          setTimeout(()=>{ splash.style.display="none"; }, 280);
+        });
+      }
+    })();
+  </script>
 
   <script src="app.js"></script>
 </body>

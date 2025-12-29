@@ -1,18 +1,18 @@
-/* app.js — ClockIn v1.0.0 (ESTABLE + SPLASH + AUTO-UPDATE SAFE) */
+/* app.js — ClockIn v2.0.0 (ESTABLE + PWA + AUTO-UPDATE + UI PRO) */
 (() => {
   "use strict";
 
-  const g = (typeof globalThis !== "undefined") ? globalThis : window;
-  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V1000";
-  try { if (g && g[LOAD_GUARD]) return; if (g) g[LOAD_GUARD] = true; } catch (_) {}
+  const VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.0.0");
 
-  const VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "1.0.0");
-  const STORAGE_KEY = "clockin_state_v1";
+  // Storage (v2) + migración desde v1
+  const STORAGE_KEY = "clockin_state_v2";
+  const LEGACY_KEYS = ["clockin_state_v1", "clockin_state_v1_0", "clockin_state_v1.0.0"];
 
   const DOW_KEYS = ["sun","mon","tue","wed","thu","fri","sat"];
   const DOW_LABEL = { mon:"Lun", tue:"Mar", wed:"Mié", thu:"Jue", fri:"Vie", sat:"Sáb", sun:"Dom" };
 
   const MAX_EVENTS_STEP = 300;
+
   const CR = (typeof globalThis !== "undefined" && globalThis.crypto) ? globalThis.crypto : null;
 
   function $(sel, root=document){ return root.querySelector(sel); }
@@ -35,41 +35,6 @@
     return s;
   }
 
-  const ui = {};
-  const renderState = { historyLimit: MAX_EVENTS_STEP, historyLastRows: [] };
-  let state = null;
-
-  function splashSet(msg){
-    const el = $("#splashMsg");
-    if (el) el.textContent = msg || "Cargando…";
-  }
-  function splashHide(){
-    const s = $("#splash");
-    if (!s) return;
-    s.classList.add("is-hidden");
-    setTimeout(()=>{ s.style.display="none"; }, 380);
-  }
-
-  function fatalScreen(title, details){
-    try { closeModal(true); } catch(_) {}
-    try { splashHide(); } catch(_) {}
-
-    const main = $(".main");
-    if (!main) { alert(title + "\n\n" + details); return; }
-    main.innerHTML = `
-      <div class="card">
-        <div class="card-title">⛔ ${escapeHtml(title)}</div>
-        <div class="muted small" style="white-space:pre-wrap">${escapeHtml(details)}</div>
-        <div class="row" style="margin-top:12px">
-          <a class="btn btn-ghost" href="./?repair">Repair (borra caché/SW)</a>
-          <button class="btn btn-primary" id="btnReload">Recargar</button>
-        </div>
-      </div>
-    `;
-    const r = $("#btnReload");
-    if (r) r.addEventListener("click", () => location.reload());
-  }
-
   function now(){ return Date.now(); }
 
   function uid(){
@@ -81,17 +46,23 @@
     const d = new Date(ms);
     return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
   }
+
+  function dowKeyFromDateKey(dayKey){
+    // dayKey: YYYY-MM-DD
+    const d = new Date(dayKey + "T12:00:00");
+    return DOW_KEYS[d.getDay()];
+  }
+
   function timeHHMM(ms){
     const d = new Date(ms);
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   }
+
   function prettyDateLong(ms){
-    try {
-      return new Intl.DateTimeFormat("es-ES",{weekday:"long",year:"numeric",month:"long",day:"numeric"}).format(new Date(ms));
-    } catch(_) {
-      return dateKeyLocal(ms);
-    }
+    try { return new Intl.DateTimeFormat("es-ES",{weekday:"long",year:"numeric",month:"long",day:"numeric"}).format(new Date(ms)); }
+    catch(_) { return dateKeyLocal(ms); }
   }
+
   function fmtDuration(ms){
     ms = Math.max(0, ms|0);
     const m = Math.floor(ms/60000);
@@ -99,8 +70,63 @@
     const mm = m%60;
     return h<=0 ? `${mm} min` : `${h} h ${mm} min`;
   }
-  function todayDowKey(){ return DOW_KEYS[new Date().getDay()]; }
 
+  function vibrate(ms){
+    try{
+      if (!state?.settings?.haptics) return;
+      if (navigator.vibrate) navigator.vibrate(ms);
+    }catch(_){}
+  }
+
+  function setSplash(msg){
+    const splash = $("#splash");
+    if (!splash) return;
+    const m = $("#splashMsg");
+    if (m && msg) m.textContent = msg;
+  }
+
+  function hideSplash(){
+    const splash = $("#splash");
+    if (!splash) return;
+    splash.style.opacity = "0";
+    splash.style.pointerEvents = "none";
+    setTimeout(()=>{ splash.remove(); }, 380);
+  }
+
+  function hardCloseOverlays(){
+    // Nunca dejar el modal/splash “encima” pillado
+    try {
+      const mb = $("#modalBackdrop");
+      if (mb) mb.hidden = true;
+    } catch(_) {}
+    try { document.body.classList.remove("modal-open"); } catch(_) {}
+    try {
+      const splash = $("#splash");
+      if (splash) splash.style.display = "none";
+    } catch(_) {}
+  }
+
+  function fatalScreen(title, details){
+    hardCloseOverlays();
+
+    const main = $("#appMain") || $(".main");
+    if (!main) { alert(title + "\n\n" + details); return; }
+
+    main.innerHTML = `
+      <div class="card">
+        <div class="card-title">⛔ ${escapeHtml(title)}</div>
+        <div class="muted small" style="white-space:pre-wrap; margin-top:8px">${escapeHtml(details)}</div>
+        <div class="row" style="margin-top:12px">
+          <a class="btn btn-ghost" href="./?repair"><span class="ms">construction</span> Repair</a>
+          <button class="btn btn-primary" id="btnReload"><span class="ms">refresh</span> Recargar</button>
+        </div>
+      </div>
+    `;
+    const r = $("#btnReload");
+    if (r) r.addEventListener("click", () => location.reload());
+  }
+
+  // ───────────────────────── Default state ─────────────────────────
   function makeDefaultSchedule(){
     const base = { off:false, start:"09:00", end:"17:00" };
     return {
@@ -125,7 +151,15 @@
     const b = { id: uid(), name: "Empleado 2", schedule: makeDefaultSchedule(), createdAt: now() };
     return {
       version: VERSION,
-      settings: { geoEnabled:false },
+      settings: {
+        geoEnabled:false,
+        theme:"dark",          // dark | light | system
+        autoUpdate:true,
+        confirmActions:false,
+        noteMode:"ask",        // ask | never
+        compact:false,
+        haptics:false
+      },
       security: { pin: null }, // {saltB64, iter, hashB64}
       employees: [a,b],
       events: [] // {id, empId, type, ts, note, loc, hash}
@@ -133,11 +167,19 @@
   }
 
   function normalizeState(s){
-    const st = (s && typeof s === "object") ? s : makeDefaultState();
+    const base = makeDefaultState();
+    const st = (s && typeof s === "object") ? s : base;
+
     st.version = VERSION;
 
-    if (!st.settings || typeof st.settings !== "object") st.settings = { geoEnabled:false };
+    if (!st.settings || typeof st.settings !== "object") st.settings = {...base.settings};
     st.settings.geoEnabled = !!st.settings.geoEnabled;
+    st.settings.theme = (st.settings.theme==="light" || st.settings.theme==="system") ? st.settings.theme : "dark";
+    st.settings.autoUpdate = (typeof st.settings.autoUpdate==="boolean") ? st.settings.autoUpdate : true;
+    st.settings.confirmActions = !!st.settings.confirmActions;
+    st.settings.noteMode = (st.settings.noteMode==="never") ? "never" : "ask";
+    st.settings.compact = !!st.settings.compact;
+    st.settings.haptics = !!st.settings.haptics;
 
     if (!st.security || typeof st.security !== "object") st.security = { pin:null };
     if (st.security.pin && (!st.security.pin.saltB64 || !st.security.pin.hashB64)) st.security.pin = null;
@@ -145,8 +187,13 @@
     if (!Array.isArray(st.employees)) st.employees = [];
     st.employees = st.employees
       .filter(e => e && e.id && e.name)
-      .map(e => ({ id:String(e.id), name:String(e.name), schedule: normalizeSchedule(e.schedule), createdAt: Number(e.createdAt||now()) }));
-    if (!st.employees.length) st.employees = makeDefaultState().employees;
+      .map(e => ({
+        id:String(e.id),
+        name:String(e.name),
+        schedule: normalizeSchedule(e.schedule),
+        createdAt: Number(e.createdAt||now())
+      }));
+    if (!st.employees.length) st.employees = base.employees;
 
     if (!Array.isArray(st.events)) st.events = [];
     st.events = st.events
@@ -164,25 +211,48 @@
     return st;
   }
 
-  function loadState(){
+  function loadFromKey(key){
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return makeDefaultState();
-      return normalizeState(JSON.parse(raw));
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      return JSON.parse(raw);
     } catch(_) {
-      return makeDefaultState();
+      return null;
     }
+  }
+
+  function loadState(){
+    // 1) v2
+    const cur = loadFromKey(STORAGE_KEY);
+    if (cur) return normalizeState(cur);
+
+    // 2) migrate v1
+    for (const k of LEGACY_KEYS){
+      const legacy = loadFromKey(k);
+      if (legacy) {
+        const migrated = normalizeState(legacy);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated)); } catch(_) {}
+        return migrated;
+      }
+    }
+
+    // 3) default
+    return makeDefaultState();
   }
 
   function saveState(){
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (_) {
-      toast("⛔", "No se pudo guardar", "El almacenamiento está bloqueado (modo privado/permisos).");
+      return true;
+    } catch (e) {
+      toast("⛔", "No se pudo guardar", "Almacenamiento bloqueado (modo privado/permisos).");
+      return false;
     }
   }
 
-  // ───────────────── Crypto helpers (PIN + Hash) ─────────────────
+  let state = null;
+
+  // ───────────────────────── Crypto (PIN + Hash) ─────────────────────────
   function b64FromBuf(buf){
     const bytes = new Uint8Array(buf);
     let s = "";
@@ -242,72 +312,71 @@
     return sha256Hex(payload);
   }
 
-  // ───────────────── UI helpers ─────────────────
+  // ───────────────────────── UI: Toast + Modal ─────────────────────────
   function toast(icon, msg, sub){
-    const zone = ui.toasts || $("#toasts");
+    const zone = $("#toasts");
     if (!zone) return;
     const el = document.createElement("div");
     el.className = "toast";
     el.innerHTML = `
-      <div class="ticon">${icon||"ℹ️"}</div>
+      <div class="ticon">${escapeHtml(icon||"ℹ️")}</div>
       <div>
         <div class="tmsg">${escapeHtml(msg)}</div>
         ${sub ? `<div class="tsub">${escapeHtml(sub)}</div>` : ""}
       </div>
     `;
     zone.appendChild(el);
-    setTimeout(()=>{ el.style.opacity="0"; el.style.transform="translateY(6px)"; }, 2400);
-    setTimeout(()=>{ el.remove(); }, 2900);
+    setTimeout(()=>{ el.style.opacity="0"; el.style.transform="translateY(6px)"; }, 2600);
+    setTimeout(()=>{ el.remove(); }, 3200);
   }
 
-  const modalBackdrop = () => ui.modalBackdrop || $("#modalBackdrop");
-  const modalTitle = () => ui.modalTitle || $("#modalTitle");
-  const modalBody = () => ui.modalBody || $("#modalBody");
-  const modalActions = () => ui.modalActions || $("#modalActions");
+  const ui = {};
+  const renderState = {
+    historyLimit: MAX_EVENTS_STEP,
+    historyLastRows: [],
+    summaryDayKey: dateKeyLocal(now())
+  };
 
-  function lockBodyScroll(lock){
-    try {
-      if (lock) document.body.classList.add("modal-open");
-      else document.body.classList.remove("modal-open");
-    } catch(_) {}
+  function modalBackdrop(){ return ui.modalBackdrop || $("#modalBackdrop"); }
+  function openModal(title, bodyNode, actions){
+    const mb = modalBackdrop();
+    if (!mb) return;
+
+    ui.modalTitle.textContent = title || "—";
+    ui.modalBody.innerHTML = "";
+    ui.modalBody.appendChild(bodyNode);
+    ui.modalActions.innerHTML = "";
+    (actions||[]).forEach(a => ui.modalActions.appendChild(a));
+
+    mb.hidden = false;
+    document.body.classList.add("modal-open");
+
+    // Focus razonable
+    setTimeout(()=>{
+      const focusable = mb.querySelector("input, textarea, select, button");
+      if (focusable) focusable.focus();
+    }, 0);
+  }
+
+  function closeModal(){
+    const mb = modalBackdrop();
+    if (!mb) return;
+    mb.hidden = true;
+    document.body.classList.remove("modal-open");
+    // limpiar contenido (evita “overlay fantasma”)
+    try{
+      ui.modalBody.innerHTML = "";
+      ui.modalActions.innerHTML = "";
+    }catch(_){}
   }
 
   function mkBtn(label, cls, onClick){
     const b = document.createElement("button");
     b.type = "button";
     b.className = cls || "btn";
-    b.textContent = label;
+    b.innerHTML = label; // label puede incluir <span class="ms">
     b.addEventListener("click", onClick);
     return b;
-  }
-
-  function openModal(title, bodyNode, actions){
-    // Limpieza defensiva para evitar “modal pillado”
-    try { modalBody().innerHTML = ""; modalActions().innerHTML = ""; } catch(_) {}
-
-    modalTitle().textContent = title || "—";
-    modalBody().appendChild(bodyNode);
-
-    (actions||[]).forEach(a => modalActions().appendChild(a));
-    const mb = modalBackdrop();
-    if (mb) mb.hidden = false;
-
-    lockBodyScroll(true);
-  }
-
-  function closeModal(force){
-    const mb = modalBackdrop();
-    if (mb) mb.hidden = true;
-    lockBodyScroll(false);
-
-    if (force) {
-      try { modalBody().innerHTML = ""; modalActions().innerHTML = ""; } catch(_) {}
-    }
-  }
-
-  function isModalOpen(){
-    const mb = modalBackdrop();
-    return mb && !mb.hidden;
   }
 
   function initialsFromName(name){
@@ -318,7 +387,42 @@
     return (a+b).toUpperCase();
   }
 
-  // ───────────────── Business logic ─────────────────
+  // Cierre garantizado: ESC + click fuera
+  function initModalGuards(){
+    const mb = modalBackdrop();
+    if (!mb) return;
+
+    mb.addEventListener("click", (e)=>{
+      if (e.target === mb) closeModal();
+    });
+
+    window.addEventListener("keydown", (e)=>{
+      if (e.key === "Escape" && !mb.hidden) closeModal();
+    });
+  }
+
+  // ───────────────────────── Theme ─────────────────────────
+  let themeMedia = null;
+  function applyTheme(){
+    const t = state.settings.theme;
+    if (t === "system"){
+      if (!themeMedia) themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+      document.documentElement.dataset.theme = themeMedia.matches ? "dark" : "light";
+    } else {
+      document.documentElement.dataset.theme = t;
+    }
+  }
+
+  function hookThemeListener(){
+    if (!themeMedia) themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+    try{
+      themeMedia.addEventListener("change", ()=>{ if (state.settings.theme==="system") applyTheme(); });
+    }catch(_){
+      try{ themeMedia.addListener(()=>{ if (state.settings.theme==="system") applyTheme(); }); }catch(__){}
+    }
+  }
+
+  // ───────────────────────── Business logic ─────────────────────────
   function getEmployee(id){ return state.employees.find(e=>e.id===id) || null; }
 
   function eventsForEmpDay(empId, dayKey){
@@ -337,6 +441,7 @@
     for (const ev of evs){
       if (ev.type==="IN"){
         if (!firstIn) firstIn=ev.ts;
+        // si hay IN repetido, reinicia tramo
         workStart = ev.ts;
         breakStart = null;
       } else if (ev.type==="BREAK_START"){
@@ -405,7 +510,29 @@
     });
   }
 
+  function validateNextAction(curPhase, actionType){
+    // Reglas para que no se rompa el flujo
+    if (actionType==="IN"){
+      return (curPhase==="OUT" || curPhase==="DONE");
+    }
+    if (actionType==="OUT"){
+      return (curPhase==="IN");
+    }
+    if (actionType==="BREAK_START"){
+      return (curPhase==="IN");
+    }
+    if (actionType==="BREAK_END"){
+      return (curPhase==="BREAK");
+    }
+    return false;
+  }
+
   function askNoteModal(title, onOk){
+    if (state.settings.noteMode === "never"){
+      onOk("");
+      return;
+    }
+
     const wrap = document.createElement("div");
     wrap.className = "field";
     wrap.innerHTML = `
@@ -415,17 +542,37 @@
     `;
     const ta = $("#mNote", wrap);
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
-    const bNo = mkBtn("Guardar sin nota","btn btn-ghost", ()=>{ closeModal(true); onOk(""); });
-    const bOk = mkBtn("Guardar","btn btn-primary", ()=>{ closeModal(true); onOk(ta.value||""); });
+    const bCancel = mkBtn(`Cancelar`, "btn btn-ghost", ()=>closeModal());
+    const bNo = mkBtn(`Guardar sin nota`, "btn btn-ghost", ()=>{ closeModal(); onOk(""); });
+    const bOk = mkBtn(`<span class="ms">done</span> Guardar`, "btn btn-primary", ()=>{ closeModal(); onOk(ta.value||""); });
 
     openModal(title, wrap, [bCancel,bNo,bOk]);
     setTimeout(()=>ta && ta.focus(),0);
   }
 
+  async function confirmIfNeeded(title, text){
+    if (!state.settings.confirmActions) return true;
+
+    return new Promise((resolve)=>{
+      const wrap = document.createElement("div");
+      wrap.innerHTML = `<div class="muted">${escapeHtml(text||"¿Confirmas la acción?")}</div>`;
+      const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>{ closeModal(); resolve(false); });
+      const bOk = mkBtn(`<span class="ms">check</span> Confirmar`,"btn btn-primary", ()=>{ closeModal(); resolve(true); });
+      openModal(title, wrap, [bCancel,bOk]);
+    });
+  }
+
   async function addEvent(empId, type, note){
     const emp = getEmployee(empId);
     if (!emp) return;
+
+    const dayKey = dateKeyLocal(now());
+    const cur = computeDay(empId, dayKey);
+
+    if (!validateNextAction(cur.phase, type)){
+      toast("⚠️", "Acción no válida", `Estado actual: ${cur.status}`);
+      return;
+    }
 
     const ev = {
       id: uid(),
@@ -441,11 +588,13 @@
 
     state.events.push(ev);
     saveState();
+
+    vibrate(18);
     toast("✅", `${eventTypeLabel(type)} — ${emp.name}`, ev.note ? ev.note : "");
     renderAll();
   }
 
-  // ───────────────── PIN ─────────────────
+  // ───────────────────────── PIN ─────────────────────────
   async function verifyPin(pin){
     const p = state.security.pin;
     if (!p) return true;
@@ -471,11 +620,11 @@
       `;
       const pin = $("#mPin", wrap);
 
-      const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>{ closeModal(true); resolve(false); });
-      const bOk = mkBtn("Verificar","btn btn-primary", async ()=>{
+      const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>{ closeModal(); resolve(false); });
+      const bOk = mkBtn(`<span class="ms">lock</span> Verificar`,"btn btn-primary", async ()=>{
         const ok = await verifyPin(pin.value||"");
         if (!ok) { toast("⛔","PIN incorrecto"); return; }
-        closeModal(true);
+        closeModal();
         resolve(true);
       });
 
@@ -502,8 +651,8 @@
     const p1 = $("#p1", wrap);
     const p2 = $("#p2", wrap);
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
-    const bOk = mkBtn("Guardar PIN","btn btn-primary", async ()=>{
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bOk = mkBtn(`<span class="ms">save</span> Guardar`,"btn btn-primary", async ()=>{
       const a = (p1.value||"").trim();
       const b = (p2.value||"").trim();
       if (a.length<4) { toast("⚠️","PIN demasiado corto","Mínimo 4 dígitos"); return; }
@@ -517,7 +666,7 @@
         const hashB64 = await pbkdf2HashB64(a, saltB64, iter);
         state.security.pin = { saltB64, iter, hashB64 };
         saveState();
-        closeModal(true);
+        closeModal();
         toast("🔐","PIN guardado");
         renderAll();
       } catch (_) {
@@ -538,7 +687,7 @@
     renderAll();
   }
 
-  // ───────────────── Employees CRUD ─────────────────
+  // ───────────────────────── Employees CRUD ─────────────────────────
   function scheduleEditorNode(schedule){
     const sch = normalizeSchedule(schedule);
     const wrap = document.createElement("div");
@@ -628,8 +777,8 @@
     wrap.appendChild(nameField);
     wrap.appendChild(schNode);
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
-    const bSave = mkBtn(isEdit ? "Guardar cambios" : "Crear empleado","btn btn-primary", ()=>{
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bSave = mkBtn(`<span class="ms">save</span> ${isEdit ? "Guardar" : "Crear"}`,"btn btn-primary", ()=>{
       const name = (nameInput.value||"").trim();
       if (name.length<2) { toast("⚠️","Nombre demasiado corto"); return; }
 
@@ -641,7 +790,7 @@
         state.employees.push({ id: uid(), name, schedule, createdAt: now() });
       }
       saveState();
-      closeModal(true);
+      closeModal();
       toast("✅", isEdit ? "Empleado actualizado" : "Empleado creado", name);
       renderAll();
     });
@@ -654,18 +803,18 @@
     const emp = getEmployee(empId);
     if (!emp) return;
 
-    const ok = await requirePinIfSet("Borrar empleado y sus eventos requiere PIN (si está activo).");
+    const ok = await requirePinIfSet("Borrar empleado y eventos requiere PIN (si está activo).");
     if (!ok) return;
 
     const wrap = document.createElement("div");
     wrap.innerHTML = `<div class="muted">Se borrará <b>${escapeHtml(emp.name)}</b> y todos sus eventos.</div>`;
 
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
-    const bDel = mkBtn("Borrar","btn btn-danger", ()=>{
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bDel = mkBtn(`<span class="ms">delete</span> Borrar`,"btn btn-danger", ()=>{
       state.employees = state.employees.filter(e=>e.id!==empId);
       state.events = state.events.filter(ev=>ev.empId!==empId);
       saveState();
-      closeModal(true);
+      closeModal();
       toast("🗑️","Empleado borrado", emp.name);
       renderAll();
     });
@@ -673,7 +822,7 @@
     openModal("Confirmar borrado", wrap, [bCancel,bDel]);
   }
 
-  // ───────────────── Export / Backup / Restore / Wipe ─────────────────
+  // ───────────────────────── Export / Backup / Restore / Wipe ─────────────────────────
   function downloadText(filename, text, mime){
     const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -696,8 +845,8 @@
     const ok = await requirePinIfSet("Exportar CSV está protegido por PIN (si está activo).");
     if (!ok) return;
 
-    const dayKey = dateKeyLocal(now());
-    const dowKey = todayDowKey();
+    const dayKey = renderState.summaryDayKey || dateKeyLocal(now());
+    const dowKey = dowKeyFromDateKey(dayKey);
 
     let csv = "Empleado,Horario,Entrada,Salida,Pausa,Trabajado,Estado\n";
     for (const emp of state.employees){
@@ -740,15 +889,15 @@
   }
 
   async function backupJSON(){
-    const ok = await requirePinIfSet("Exportar copia JSON está protegido por PIN (si está activo).");
+    const ok = await requirePinIfSet("Exportar backup JSON está protegido por PIN (si está activo).");
     if (!ok) return;
 
     downloadText(`clockin_backup_${dateKeyLocal(now())}.json`, JSON.stringify(state, null, 2), "application/json;charset=utf-8");
-    toast("⬇️","Copia JSON exportada");
+    toast("⬇️","Backup JSON exportado");
   }
 
   async function restoreJSON(file){
-    const ok = await requirePinIfSet("Importar copia JSON está protegido por PIN (si está activo).");
+    const ok = await requirePinIfSet("Importar backup JSON está protegido por PIN (si está activo).");
     if (!ok) return;
 
     const text = await file.text();
@@ -758,11 +907,11 @@
 
     const wrap = document.createElement("div");
     wrap.innerHTML = `<div class="muted">Vas a reemplazar los datos actuales por la copia importada.</div>`;
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
-    const bOk = mkBtn("Importar","btn btn-primary", ()=>{
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bOk = mkBtn(`<span class="ms">file_upload</span> Importar`,"btn btn-primary", ()=>{
       state = normalizeState(parsed);
       saveState();
-      closeModal(true);
+      closeModal();
       toast("✅","Copia importada");
       renderAll();
     });
@@ -775,18 +924,17 @@
 
     const wrap = document.createElement("div");
     wrap.innerHTML = `<div class="muted">Esto borrará empleados, horarios y eventos (solo en este dispositivo).</div>`;
-    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal(true));
-    const bOk = mkBtn("Borrar todo","btn btn-danger", ()=>{
+    const bCancel = mkBtn("Cancelar","btn btn-ghost", ()=>closeModal());
+    const bOk = mkBtn(`<span class="ms">delete_forever</span> Borrar todo`,"btn btn-danger", ()=>{
       try { localStorage.removeItem(STORAGE_KEY); } catch(_) {}
-      closeModal(true);
+      closeModal();
       location.reload();
     });
     openModal("Confirmar borrado total", wrap, [bCancel,bOk]);
   }
 
-  // ───────────────── Routing / Render ─────────────────
+  // ───────────────────────── Rendering / Routing ─────────────────────────
   function setRoute(route){
-    closeModal(true); // ✅ evita modales “pillados” al navegar
     $$(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.route===route));
     $$(".view").forEach(v => v.hidden = (v.dataset.route!==route));
     renderAll();
@@ -795,9 +943,11 @@
   function renderPanel(){
     ui.employeeList.innerHTML = "";
     const dayKey = dateKeyLocal(now());
-    const dowKey = todayDowKey();
+    const dowKey = dowKeyFromDateKey(dayKey);
 
     ui.uiCounts.textContent = `${state.employees.length} empleado(s)`;
+
+    const frag = document.createDocumentFragment();
 
     for (const emp of state.employees){
       const d = computeDay(emp.id, dayKey);
@@ -826,36 +976,80 @@
 
       const btnClock = document.createElement("button");
       btnClock.className = "btn btn-primary";
-      btnClock.textContent = (d.phase==="OUT" || d.phase==="DONE") ? "Entrada" : "Salida";
-      btnClock.addEventListener("click", ()=>{
+      btnClock.innerHTML = (d.phase==="OUT" || d.phase==="DONE")
+        ? `<span class="ms">login</span> Entrada`
+        : `<span class="ms">logout</span> Salida`;
+
+      btnClock.addEventListener("click", async ()=>{
         const cur = computeDay(emp.id, dayKey);
-        if (cur.phase==="BREAK"){ toast("⚠️","Termina la pausa antes de salir"); return; }
         const type = (cur.phase==="OUT" || cur.phase==="DONE") ? "IN" : "OUT";
+        if (!validateNextAction(cur.phase, type)){
+          toast("⚠️","Acción no válida", `Estado: ${cur.status}`);
+          return;
+        }
+        if (type==="OUT" && cur.phase==="BREAK"){
+          toast("⚠️","Termina la pausa antes de salir");
+          return;
+        }
+        const ok = await confirmIfNeeded(`${eventTypeLabel(type)} — ${emp.name}`, `¿Registrar ${eventTypeLabel(type).toLowerCase()} ahora?`);
+        if (!ok) return;
         askNoteModal(`${eventTypeLabel(type)} — ${emp.name}`, (note)=>addEvent(emp.id, type, note));
       });
 
       const btnBreak = document.createElement("button");
       btnBreak.className = "btn";
-      btnBreak.textContent = (d.phase==="BREAK") ? "Fin pausa" : "Pausa";
+      btnBreak.innerHTML = (d.phase==="BREAK")
+        ? `<span class="ms">play_arrow</span> Fin pausa`
+        : `<span class="ms">pause</span> Pausa`;
+
       btnBreak.disabled = (d.phase==="OUT" || d.phase==="DONE");
-      btnBreak.addEventListener("click", ()=>{
+      btnBreak.addEventListener("click", async ()=>{
         const cur = computeDay(emp.id, dayKey);
         if (cur.phase==="OUT" || cur.phase==="DONE") return;
         const type = (cur.phase==="BREAK") ? "BREAK_END" : "BREAK_START";
+        if (!validateNextAction(cur.phase, type)){
+          toast("⚠️","Acción no válida", `Estado: ${cur.status}`);
+          return;
+        }
+        const ok = await confirmIfNeeded(`${eventTypeLabel(type)} — ${emp.name}`, `¿Registrar ${eventTypeLabel(type).toLowerCase()} ahora?`);
+        if (!ok) return;
         askNoteModal(`${eventTypeLabel(type)} — ${emp.name}`, (note)=>addEvent(emp.id, type, note));
+      });
+
+      const btnMore = document.createElement("button");
+      btnMore.className = "btn btn-ghost";
+      btnMore.innerHTML = `<span class="ms">more_vert</span>`;
+      btnMore.title = "Opciones";
+      btnMore.addEventListener("click", ()=>{
+        const wrap = document.createElement("div");
+        wrap.style.display = "grid";
+        wrap.style.gap = "10px";
+        wrap.innerHTML = `
+          <div class="muted">Acciones para <b>${escapeHtml(emp.name)}</b></div>
+        `;
+        const bEdit = mkBtn(`<span class="ms">edit</span> Editar empleado`,"btn", ()=>{ closeModal(); addOrEditEmployeeFlow(emp.id); });
+        const bDel = mkBtn(`<span class="ms">delete</span> Borrar empleado`,"btn btn-danger", ()=>{ closeModal(); deleteEmployeeFlow(emp.id); });
+        const bClose = mkBtn("Cerrar","btn btn-ghost", ()=>closeModal());
+        openModal("Opciones", wrap, [bClose,bEdit,bDel]);
       });
 
       right.appendChild(btnClock);
       right.appendChild(btnBreak);
+      right.appendChild(btnMore);
 
-      ui.employeeList.appendChild(el);
+      frag.appendChild(el);
     }
+
+    ui.employeeList.appendChild(frag);
   }
 
   function renderResumen(){
     ui.summaryBody.innerHTML = "";
-    const dayKey = dateKeyLocal(now());
-    const dowKey = todayDowKey();
+
+    const dayKey = renderState.summaryDayKey || dateKeyLocal(now());
+    const dowKey = dowKeyFromDateKey(dayKey);
+
+    const frag = document.createDocumentFragment();
 
     for (const emp of state.employees){
       const d = computeDay(emp.id, dayKey);
@@ -869,8 +1063,10 @@
         <td>${escapeHtml(fmtDuration(d.workMs))}</td>
         <td>${escapeHtml(d.status)}</td>
       `;
-      ui.summaryBody.appendChild(tr);
+      frag.appendChild(tr);
     }
+
+    ui.summaryBody.appendChild(frag);
   }
 
   function fillEmpFilter(){
@@ -920,6 +1116,8 @@
     renderState.historyLastRows = allRows;
 
     ui.eventsBody.innerHTML = "";
+    const frag = document.createDocumentFragment();
+
     for (const ev of rows){
       const emp = getEmployee(ev.empId);
       const loc = ev.loc ? `${ev.loc.lat}, ${ev.loc.lon}` : "";
@@ -933,8 +1131,10 @@
         <td class="mono">${escapeHtml(loc)}</td>
         <td class="mono">${escapeHtml((ev.hash||"").slice(0,16))}${(ev.hash||"") ? "…" : ""}</td>
       `;
-      ui.eventsBody.appendChild(tr);
+      frag.appendChild(tr);
     }
+
+    ui.eventsBody.appendChild(frag);
 
     ui.uiEventCount.textContent = `Mostrando ${rows.length} de ${allRows.length} evento(s).`;
     ui.btnLoadMore.hidden = (allRows.length <= limit);
@@ -942,9 +1142,21 @@
 
   function renderAjustes(){
     ui.uiVer.textContent = VERSION;
+
     ui.tglGeo.checked = !!state.settings.geoEnabled;
 
+    ui.optTheme.value = state.settings.theme;
+    ui.optAutoUpdate.checked = !!state.settings.autoUpdate;
+    ui.optConfirmActions.checked = !!state.settings.confirmActions;
+    ui.optNoteMode.value = state.settings.noteMode;
+    ui.optCompact.checked = !!state.settings.compact;
+    ui.optHaptics.checked = !!state.settings.haptics;
+
+    document.body.classList.toggle("compact", !!state.settings.compact);
+
     ui.employeeAdminList.innerHTML = "";
+    const frag = document.createDocumentFragment();
+
     for (const emp of state.employees){
       const d = document.createElement("div");
       d.className = "emp";
@@ -954,7 +1166,7 @@
           <div class="emp-meta">
             <div class="emp-name">${escapeHtml(emp.name)}</div>
             <div class="emp-sub">
-              <span class="pill">${escapeHtml(scheduleStr(emp, todayDowKey()))}</span>
+              <span class="pill">${escapeHtml(scheduleStr(emp, dowKeyFromDateKey(dateKeyLocal(now()))))}</span>
               <span class="pill off">ID: <span class="mono">${escapeHtml(emp.id.slice(0,8))}</span></span>
             </div>
           </div>
@@ -962,10 +1174,12 @@
         <div class="emp-right"></div>
       `;
       const right = $(".emp-right", d);
-      right.appendChild(mkBtn("Editar","btn", ()=>addOrEditEmployeeFlow(emp.id)));
-      right.appendChild(mkBtn("Borrar","btn btn-danger", ()=>deleteEmployeeFlow(emp.id)));
-      ui.employeeAdminList.appendChild(d);
+      right.appendChild(mkBtn(`<span class="ms">edit</span> Editar`,"btn", ()=>addOrEditEmployeeFlow(emp.id)));
+      right.appendChild(mkBtn(`<span class="ms">delete</span> Borrar`,"btn btn-danger", ()=>deleteEmployeeFlow(emp.id)));
+      frag.appendChild(d);
     }
+
+    ui.employeeAdminList.appendChild(frag);
   }
 
   function renderAll(){
@@ -979,71 +1193,178 @@
     if (active==="ajustes") renderAjustes();
   }
 
-  // ───────────────── Service Worker (AUTO UPDATE SAFE) ─────────────────
-  function isSafeToAutoReload(){
-    if (isModalOpen()) return false;
-    const ae = document.activeElement;
-    if (!ae) return true;
-    const tag = (ae.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return false;
-    return true;
-  }
+  // ───────────────────────── Service Worker (AUTO-UPDATE sin loops) ─────────────────────────
+  const SW_RELOAD_GUARD = "clockin_sw_reload_once";
 
   async function initSW(){
     if (!("serviceWorker" in navigator)) return;
-    const btn = ui.btnUpdate;
-    if (!btn) return;
 
-    try {
-      const reg = await navigator.serviceWorker.register("./sw.js");
+    // Reload seguro (1 sola vez) cuando cambia el controller
+    navigator.serviceWorker.addEventListener("controllerchange", ()=>{
+      if (sessionStorage.getItem(SW_RELOAD_GUARD)) return;
+      sessionStorage.setItem(SW_RELOAD_GUARD, "1");
+      location.reload();
+    });
 
-      const tryApplyWaiting = async () => {
-        if (!reg.waiting) return;
-        btn.hidden = false;
+    try{
+      const reg = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
 
-        // Auto-aplica si es seguro (sin modal / sin escribir)
-        if (isSafeToAutoReload()) {
-          toast("♻️", "Actualizando…", "Aplicando la nueva versión.");
-          try { reg.waiting.postMessage({type:"SKIP_WAITING"}); } catch(_) {}
-          setTimeout(()=>location.reload(), 350);
+      const showUpdate = ()=>{
+        ui.btnUpdate.hidden = false;
+        if (state.settings.autoUpdate){
+          // auto-aplica si no hay modal abierto
+          setTimeout(()=>{
+            const mb = ui.modalBackdrop;
+            if (mb && !mb.hidden) return;
+            applyUpdate(reg);
+          }, 700);
         }
       };
 
-      // Si ya hay waiting al entrar
-      await tryApplyWaiting();
+      const applyIfWaiting = ()=>{
+        if (reg.waiting) showUpdate();
+      };
+
+      applyIfWaiting();
 
       reg.addEventListener("updatefound", ()=>{
         const inst = reg.installing;
         if (!inst) return;
         inst.addEventListener("statechange", ()=>{
-          if (inst.state==="installed" && navigator.serviceWorker.controller) {
-            // Hay update listo
-            tryApplyWaiting();
+          if (inst.state === "installed" && navigator.serviceWorker.controller){
+            showUpdate();
           }
         });
       });
 
-      // Botón update manual (por si no era seguro auto)
-      btn.addEventListener("click", ()=>{
-        try {
-          btn.disabled = true;
-          if (reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
-          setTimeout(()=>location.reload(), 300);
-        } catch(_) {
-          btn.disabled = false;
-        }
+      ui.btnUpdate.addEventListener("click", ()=>applyUpdate(reg));
+
+      // Forzar búsqueda de updates de forma suave
+      const softUpdate = async ()=>{
+        try{
+          if (navigator.onLine) await reg.update();
+        }catch(_){}
+      };
+      setTimeout(softUpdate, 1200);
+      setInterval(softUpdate, 30 * 60 * 1000);
+
+      document.addEventListener("visibilitychange", ()=>{
+        if (!document.hidden) softUpdate();
       });
 
-    } catch (_) {}
+    }catch(_){}
   }
 
-  // ───────────────── Boot ─────────────────
+  function applyUpdate(reg){
+    try{
+      ui.btnUpdate.disabled = true;
+      if (reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
+      // el reload real lo hace controllerchange (y solo 1 vez)
+      setTimeout(()=>{ ui.btnUpdate.disabled = false; }, 1500);
+    }catch(_){
+      ui.btnUpdate.disabled = false;
+    }
+  }
+
+  // ───────────────────────── Boot ─────────────────────────
+  function bindOptionHandlers(){
+    ui.optTheme.addEventListener("change", ()=>{
+      state.settings.theme = ui.optTheme.value;
+      saveState();
+      applyTheme();
+      toast("🎨", "Tema actualizado", state.settings.theme === "system" ? "Sistema" : state.settings.theme);
+    });
+
+    ui.optAutoUpdate.addEventListener("change", ()=>{
+      state.settings.autoUpdate = ui.optAutoUpdate.checked;
+      saveState();
+      toast("🔁", state.settings.autoUpdate ? "Auto-update activado" : "Auto-update desactivado");
+    });
+
+    ui.optConfirmActions.addEventListener("change", ()=>{
+      state.settings.confirmActions = ui.optConfirmActions.checked;
+      saveState();
+      toast("✅", state.settings.confirmActions ? "Confirmaciones activadas" : "Confirmaciones desactivadas");
+    });
+
+    ui.optNoteMode.addEventListener("change", ()=>{
+      state.settings.noteMode = ui.optNoteMode.value;
+      saveState();
+      toast("📝", "Notas al fichar", state.settings.noteMode === "ask" ? "Preguntar" : "Nunca");
+    });
+
+    ui.optCompact.addEventListener("change", ()=>{
+      state.settings.compact = ui.optCompact.checked;
+      saveState();
+      renderAll();
+      toast("📐", state.settings.compact ? "Modo compacto ON" : "Modo compacto OFF");
+    });
+
+    ui.optHaptics.addEventListener("change", ()=>{
+      state.settings.haptics = ui.optHaptics.checked;
+      saveState();
+      vibrate(18);
+      toast("📳", state.settings.haptics ? "Vibración ON" : "Vibración OFF");
+    });
+
+    ui.tglGeo.addEventListener("change", ()=>{
+      state.settings.geoEnabled = ui.tglGeo.checked;
+      saveState();
+      toast("📍", state.settings.geoEnabled ? "Geolocalización activada" : "Geolocalización desactivada");
+    });
+  }
+
+  function bindSummaryDateControls(){
+    const clampDate = (dk)=>{
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return dateKeyLocal(now());
+      return dk;
+    };
+
+    ui.sumDate.value = renderState.summaryDayKey;
+
+    ui.sumDate.addEventListener("change", ()=>{
+      renderState.summaryDayKey = clampDate(ui.sumDate.value);
+      renderAll();
+    });
+
+    ui.btnSumPrev.addEventListener("click", ()=>{
+      const d = new Date(renderState.summaryDayKey + "T12:00:00");
+      d.setDate(d.getDate() - 1);
+      renderState.summaryDayKey = dateKeyLocal(d.getTime());
+      ui.sumDate.value = renderState.summaryDayKey;
+      renderAll();
+    });
+
+    ui.btnSumNext.addEventListener("click", ()=>{
+      const d = new Date(renderState.summaryDayKey + "T12:00:00");
+      d.setDate(d.getDate() + 1);
+      renderState.summaryDayKey = dateKeyLocal(d.getTime());
+      ui.sumDate.value = renderState.summaryDayKey;
+      renderAll();
+    });
+  }
+
+  function bindGlobalGuards(){
+    window.addEventListener("error", (e)=>{
+      try{
+        console.error(e.error || e.message);
+        fatalScreen("Error inesperado", (e.error && e.error.stack) ? e.error.stack : String(e.message || e.error || e));
+      }catch(_){}
+    });
+
+    window.addEventListener("unhandledrejection", (e)=>{
+      try{
+        console.error(e.reason);
+        fatalScreen("Promesa rechazada", (e.reason && e.reason.stack) ? e.reason.stack : String(e.reason));
+      }catch(_){}
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     try {
-      splashSet("Inicializando…");
+      setSplash("Inicializando…");
 
-      ui.toasts = $("#toasts");
-
+      // UI refs
       ui.uiDate = $("#uiDate");
       ui.uiCounts = $("#uiCounts");
       ui.uiOffline = $("#uiOffline");
@@ -1060,67 +1381,82 @@
       ui.fTo = $("#fTo");
 
       ui.btnUpdate = $("#btnUpdate");
-      ui.tglGeo = $("#tglGeo");
-
       ui.btnLoadMore = $("#btnLoadMore");
       ui.uiEventCount = $("#uiEventCount");
+
+      ui.tglGeo = $("#tglGeo");
 
       ui.modalBackdrop = $("#modalBackdrop");
       ui.modalTitle = $("#modalTitle");
       ui.modalBody = $("#modalBody");
       ui.modalActions = $("#modalActions");
 
-      const required = [
-        ["#uiDate", ui.uiDate],
-        ["#uiCounts", ui.uiCounts],
-        ["#uiOffline", ui.uiOffline],
-        ["#employeeList", ui.employeeList],
-        ["#employeeAdminList", ui.employeeAdminList],
-        ["#summaryTable tbody", ui.summaryBody],
-        ["#eventsTable tbody", ui.eventsBody],
-        ["#fEmp", ui.fEmp],
-        ["#fFrom", ui.fFrom],
-        ["#fTo", ui.fTo],
-        ["#btnLoadMore", ui.btnLoadMore],
-        ["#uiEventCount", ui.uiEventCount],
-        ["#tglGeo", ui.tglGeo],
-        ["#modalBackdrop", ui.modalBackdrop],
-        ["#modalTitle", ui.modalTitle],
-        ["#modalBody", ui.modalBody],
-        ["#modalActions", ui.modalActions]
-      ];
-      for (const [sel, el] of required){
-        if (!el) throw new Error(`Falta el elemento ${sel} en index.html (ID/estructura incorrecta).`);
-      }
+      ui.optTheme = $("#optTheme");
+      ui.optAutoUpdate = $("#optAutoUpdate");
+      ui.optConfirmActions = $("#optConfirmActions");
+      ui.optNoteMode = $("#optNoteMode");
+      ui.optCompact = $("#optCompact");
+      ui.optHaptics = $("#optHaptics");
 
-      // Modal close handlers (anti “pillado”)
+      ui.sumDate = $("#sumDate");
+      ui.btnSumPrev = $("#btnSumPrev");
+      ui.btnSumNext = $("#btnSumNext");
+
+      // Required minimal
+      const required = [
+        ui.uiDate, ui.uiCounts, ui.uiOffline,
+        ui.employeeList, ui.employeeAdminList,
+        ui.summaryBody, ui.eventsBody,
+        ui.fEmp, ui.fFrom, ui.fTo,
+        ui.btnUpdate, ui.btnLoadMore, ui.uiEventCount,
+        ui.tglGeo,
+        ui.modalBackdrop, ui.modalTitle, ui.modalBody, ui.modalActions,
+        ui.optTheme, ui.optAutoUpdate, ui.optConfirmActions, ui.optNoteMode, ui.optCompact, ui.optHaptics,
+        ui.sumDate, ui.btnSumPrev, ui.btnSumNext
+      ];
+      if (required.some(x=>!x)) throw new Error("Faltan elementos en index.html (IDs/estructura incorrecta).");
+
+      // Modal close
       const mClose = $("#modalClose");
-      if (mClose) mClose.addEventListener("click", ()=>closeModal(true));
-      ui.modalBackdrop.addEventListener("click", (e)=>{ if (e.target === ui.modalBackdrop) closeModal(true); });
-      window.addEventListener("keydown", (e)=>{ if (e.key === "Escape" && isModalOpen()) closeModal(true); });
+      if (mClose) mClose.addEventListener("click", closeModal);
+      initModalGuards();
 
       // state
-      splashSet("Cargando datos…");
+      setSplash("Cargando datos…");
       state = loadState();
+
+      // theme
+      applyTheme();
+      hookThemeListener();
+
+      // apply settings UI
+      ui.uiVer.textContent = VERSION;
 
       // tabs
       $$(".tab").forEach(btn => btn.addEventListener("click", ()=>setRoute(btn.dataset.route)));
 
       // actions
       const btnQuickAdd = $("#btnQuickAdd");
-      if (btnQuickAdd) btnQuickAdd.addEventListener("click", ()=>addOrEditEmployeeFlow(null));
-
       const btnAddEmp = $("#btnAddEmp");
-      if (btnAddEmp) btnAddEmp.addEventListener("click", ()=>addOrEditEmployeeFlow(null));
+      const fabAdd = $("#fabAdd");
+      const openAdd = ()=>addOrEditEmployeeFlow(null);
 
-      const btnExportResumen = $("#btnExportResumen");
-      if (btnExportResumen) btnExportResumen.addEventListener("click", exportResumenCSV);
+      if (btnQuickAdd) btnQuickAdd.addEventListener("click", openAdd);
+      if (btnAddEmp) btnAddEmp.addEventListener("click", openAdd);
+      if (fabAdd) fabAdd.addEventListener("click", openAdd);
 
-      const btnExportEventos = $("#btnExportEventos");
-      if (btnExportEventos) btnExportEventos.addEventListener("click", ()=>exportEventosCSV(renderState.historyLastRows || null));
+      $("#btnExportResumen").addEventListener("click", exportResumenCSV);
+      $("#btnExportEventos").addEventListener("click", ()=>exportEventosCSV(renderState.historyLastRows || null));
 
-      const btnApplyFilters = $("#btnApplyFilters");
-      if (btnApplyFilters) btnApplyFilters.addEventListener("click", ()=>{
+      $("#btnApplyFilters").addEventListener("click", ()=>{
+        renderState.historyLimit = MAX_EVENTS_STEP;
+        renderHistorial();
+      });
+
+      $("#btnClearFilters").addEventListener("click", ()=>{
+        ui.fEmp.value = "";
+        ui.fFrom.value = "";
+        ui.fTo.value = "";
         renderState.historyLimit = MAX_EVENTS_STEP;
         renderHistorial();
       });
@@ -1130,60 +1466,59 @@
         renderHistorial();
       });
 
-      const btnBackup = $("#btnBackup");
-      if (btnBackup) btnBackup.addEventListener("click", backupJSON);
+      $("#btnBackup").addEventListener("click", backupJSON);
 
       const filePicker = $("#filePicker");
-      const btnRestore = $("#btnRestore");
-      if (btnRestore && filePicker){
-        btnRestore.addEventListener("click", async ()=>{
-          const ok = await requirePinIfSet("Importar copia JSON está protegido por PIN (si está activo).");
-          if (!ok) return;
-          filePicker.value = "";
-          filePicker.click();
-        });
-        filePicker.addEventListener("change", async ()=>{
-          const file = filePicker.files && filePicker.files[0];
-          if (!file) return;
-          restoreJSON(file);
-        });
-      }
-
-      const btnWipe = $("#btnWipe");
-      if (btnWipe) btnWipe.addEventListener("click", wipeAll);
-
-      const btnSetPin = $("#btnSetPin");
-      if (btnSetPin) btnSetPin.addEventListener("click", setPinFlow);
-
-      const btnClearPin = $("#btnClearPin");
-      if (btnClearPin) btnClearPin.addEventListener("click", clearPinFlow);
-
-      ui.tglGeo.addEventListener("change", ()=>{
-        state.settings.geoEnabled = ui.tglGeo.checked;
-        saveState();
-        toast("📍", state.settings.geoEnabled ? "Geolocalización activada" : "Geolocalización desactivada");
+      $("#btnRestore").addEventListener("click", async ()=>{
+        const ok = await requirePinIfSet("Importar backup JSON está protegido por PIN (si está activo).");
+        if (!ok) return;
+        filePicker.value = "";
+        filePicker.click();
+      });
+      filePicker.addEventListener("change", ()=>{
+        const file = filePicker.files && filePicker.files[0];
+        if (!file) return;
+        restoreJSON(file);
       });
 
+      $("#btnWipe").addEventListener("click", wipeAll);
+
+      $("#btnSetPin").addEventListener("click", setPinFlow);
+      $("#btnClearPin").addEventListener("click", clearPinFlow);
+
+      bindOptionHandlers();
+      bindSummaryDateControls();
+
+      // offline badge
       window.addEventListener("online", ()=>{ ui.uiOffline.hidden = true; });
       window.addEventListener("offline", ()=>{ ui.uiOffline.hidden = false; });
 
-      splashSet("Listo");
+      // render
+      setSplash("Preparando interfaz…");
+      renderState.summaryDayKey = dateKeyLocal(now());
+      ui.sumDate.value = renderState.summaryDayKey;
+
       renderAll();
+
+      // SW
       initSW();
 
-      // refresco suave para tiempos
+      // refresco suave (solo panel/resumen)
       setInterval(()=>{
         const active = ($$(".tab").find(t=>t.classList.contains("is-active"))?.dataset.route) || "panel";
         if (active==="panel" || active==="resumen") renderAll();
       }, 15000);
 
-      // ✅ ocultar splash al final (siempre)
-      setTimeout(splashHide, 260);
+      // done
+      setTimeout(()=>hideSplash(), 350);
 
     } catch (e) {
       console.error(e);
       fatalScreen("La app falló al iniciar", (e && e.stack) ? e.stack : String(e));
     }
   });
+
+  // guards global (por si algo revienta fuera)
+  bindGlobalGuards();
 
 })();

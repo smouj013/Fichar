@@ -1,12 +1,16 @@
 {
   "name": "ClockIn",
   "short_name": "ClockIn",
-  "description": "ClockIn — app PWA de fichaje con múltiples empleados, horarios semanales, resumen diario, historial, export CSV, PIN y modo offline.",
-  "start_url": "./?v=1.0.0",
+  "description": "ClockIn — PWA de fichaje: empleados, entrada/salida, pausas, resumen, historial, CSV, PIN y offline.",
+  "id": "./?source=pwa",
+  "start_url": "./?v=2.0.0",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#0b0b10",
   "theme_color": "#0b0b10",
+  "categories": ["business", "productivity", "utilities"],
+  "orientation": "portrait-primary",
   "icons": [
     { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },

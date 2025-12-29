@@ -1,9 +1,11 @@
-/* sw.js — ClockIn v1.0.0 (APP SHELL + SWR + SAFE UPDATE) */
+/* sw.js — ClockIn v2.0.0 (AUTO-UPDATE estable + offline) */
 (() => {
   "use strict";
 
-  const VERSION = "1.0.0";
+  const VERSION = "2.0.0";
   const CACHE = `clockin-${VERSION}`;
+
+  // Precaching (misma ruta/origen)
   const CORE = [
     "./",
     "./index.html",
@@ -23,8 +25,12 @@
   self.addEventListener("install", (e) => {
     e.waitUntil((async () => {
       const c = await caches.open(CACHE);
-      await c.addAll(CORE);
-      // No skipWaiting aquí: evitamos loops raros (iOS). Se activa vía postMessage.
+
+      // Fuerza a saltarse caches HTTP del navegador durante install
+      const reqs = CORE.map(u => new Request(u, { cache: "reload" }));
+      await c.addAll(reqs);
+
+      // No hacemos skipWaiting aquí (evita loops raros en iOS)
     })());
   });
 
@@ -40,6 +46,19 @@
     if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting();
   });
 
+  async function fetchWithTimeout(req, ms){
+    const ctl = new AbortController();
+    const t = setTimeout(()=>ctl.abort(), ms);
+    try{
+      const res = await fetch(req, { signal: ctl.signal });
+      clearTimeout(t);
+      return res;
+    }catch(err){
+      clearTimeout(t);
+      throw err;
+    }
+  }
+
   self.addEventListener("fetch", (e) => {
     const req = e.request;
     if (req.method !== "GET") return;
@@ -47,33 +66,57 @@
     const url = new URL(req.url);
     if (url.origin !== self.location.origin) return;
 
-    // Navegación: network-first con fallback a cache (offline)
+    // Navegación: network-first, fallback cache (ignora query para evitar “no recarga nada”)
     if (req.mode === "navigate") {
       e.respondWith((async () => {
+        const c = await caches.open(CACHE);
         try {
-          const fresh = await fetch(req);
-          const c = await caches.open(CACHE);
-          c.put("./index.html", fresh.clone()).catch(() => {});
+          const fresh = await fetchWithTimeout(req, 4500);
+          // guarda index para offline
+          c.put("./index.html", fresh.clone()).catch(()=>{});
           return fresh;
         } catch (_) {
-          const c = await caches.open(CACHE);
-          return (await c.match("./index.html")) || (await c.match("./")) || Response.error();
+          return (await c.match("./index.html", { ignoreSearch: true }))
+            || (await c.match("./", { ignoreSearch: true }))
+            || Response.error();
         }
       })());
       return;
     }
 
-    // Stale-while-revalidate para assets
+    // Estáticos: cache-first + refresh en background
+    const isStatic = (
+      url.pathname.endsWith(".js") ||
+      url.pathname.endsWith(".css") ||
+      url.pathname.endsWith(".webmanifest") ||
+      url.pathname.endsWith(".png") ||
+      url.pathname.endsWith(".svg") ||
+      url.pathname.endsWith(".ico")
+    );
+
+    if (isStatic) {
+      e.respondWith((async () => {
+        const c = await caches.open(CACHE);
+        const cached = await c.match(req, { ignoreSearch: true });
+        const net = fetch(req).then(res => {
+          c.put(req, res.clone()).catch(()=>{});
+          return res;
+        }).catch(()=>null);
+        return cached || (await net) || Response.error();
+      })());
+      return;
+    }
+
+    // Default: stale-while-revalidate
     e.respondWith((async () => {
       const c = await caches.open(CACHE);
       const cached = await c.match(req);
-
       const net = fetch(req).then(res => {
-        c.put(req, res.clone()).catch(() => {});
+        c.put(req, res.clone()).catch(()=>{});
         return res;
-      }).catch(() => null);
-
+      }).catch(()=>null);
       return cached || (await net) || Response.error();
     })());
   });
+
 })();
