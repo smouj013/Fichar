@@ -76,6 +76,46 @@ body{
   padding: var(--pad);
 }
 
+.cardHead{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+}
+
+.summaryGrid{
+  margin-top: 12px;
+  display:grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap:12px;
+}
+@media (max-width:1100px){
+  .summaryGrid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width:720px){
+  .summaryGrid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.summaryItem{
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.14);
+  border-radius: 14px;
+  padding: 12px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-height: 76px;
+}
+.summaryLabel{
+  font-size:12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+}
+.summaryValue{
+  font-size: 22px;
+  font-weight: 900;
+}
+
 .controlsRow{
   display:grid;
   grid-template-columns: 1.2fr 1fr;
@@ -144,7 +184,7 @@ body{
 
 .tableHead{
   display:grid;
-  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.8fr;
+  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.7fr 0.8fr;
   gap: 10px;
   padding: 12px 12px;
   font-size: 12px;
@@ -157,9 +197,9 @@ body{
 }
 @media (max-width:860px){
   .tableHead{
-    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr;
+    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr 0.7fr;
   }
-  .tableHead > div:nth-child(5){ display:none; }
+  .tableHead > div:nth-child(6){ display:none; }
 }
 
 .tableBody{
@@ -169,7 +209,7 @@ body{
 
 .row{
   display:grid;
-  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.8fr;
+  grid-template-columns: 1.4fr 1fr 0.8fr 0.8fr 0.7fr 0.8fr;
   gap:10px;
   padding: 12px 12px;
   border-bottom: 1px solid rgba(255,255,255,.06);
@@ -178,7 +218,7 @@ body{
 .row:last-child{ border-bottom:none; }
 @media (max-width:860px){
   .row{
-    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr;
+    grid-template-columns: 1.2fr 1fr 0.8fr 0.8fr 0.7fr;
   }
   .row .actionCell{ display:none; }
 }
@@ -240,6 +280,7 @@ body{
   color: rgba(232,232,238,.95);
 }
 .timeCell.muted{ color: rgba(232,232,238,.45); font-weight: 700; }
+.timeCell.inProgress{ color: var(--warn); }
 
 .actionBtn{
   width: 100%;

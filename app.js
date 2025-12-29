@@ -27,6 +27,14 @@
     employeeList: $("employeeList"),
     listSub: $("listSub"),
 
+    summarySub: $("summarySub"),
+    summaryTotal: $("summaryTotal"),
+    summaryInside: $("summaryInside"),
+    summaryOnShift: $("summaryOnShift"),
+    summaryNoShift: $("summaryNoShift"),
+    summaryCompleted: $("summaryCompleted"),
+    summaryHours: $("summaryHours"),
+
     events: $("events"),
 
     btnExportDay: $("btnExportDay"),
@@ -94,6 +102,14 @@
   function fmtFull(ms) {
     const d = new Date(ms);
     return `${toDateInputValue(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+
+  function fmtDuration(ms) {
+    if (!ms || ms <= 0) return "—";
+    const totalMinutes = Math.floor(ms / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${pad2(minutes)}m`;
   }
 
   function weekdayIndex(dateObj) {
@@ -332,6 +348,7 @@
           <div class="shiftCell"><div class="shiftMain">—</div></div>
           <div class="timeCell muted">—</div>
           <div class="timeCell muted">—</div>
+          <div class="timeCell muted">—</div>
           <div class="actionCell"></div>
         </div>
       `;
@@ -347,6 +364,12 @@
 
       const inTxt = rec.inTs ? fmtTime(rec.inTs) : "—";
       const outTxt = rec.outTs ? fmtTime(rec.outTs) : "—";
+      const durationMs = rec.inTs && rec.outTs
+        ? Math.max(0, rec.outTs - rec.inTs)
+        : (rec.inTs && isToday ? Math.max(0, now.getTime() - rec.inTs) : 0);
+      const durationTxt = rec.inTs
+        ? fmtDuration(durationMs)
+        : "—";
 
       const inside = !!rec.inTs && !rec.outTs;
       const shiftTxt = shift ? `${shift.start}–${shift.end}` : "Sin turno";
@@ -383,6 +406,7 @@
 
           <div class="timeCell ${rec.inTs ? "" : "muted"}">${escapeHtml(inTxt)}</div>
           <div class="timeCell ${rec.outTs ? "" : "muted"}">${escapeHtml(outTxt)}</div>
+          <div class="timeCell ${inside ? "inProgress" : (rec.inTs ? "" : "muted")}">${escapeHtml(durationTxt)}</div>
 
           <div class="actionCell">
             <button class="btn actionBtn ${btnClass}" type="button" data-action="punch" data-emp="${emp.id}">
@@ -402,6 +426,49 @@
         handlePunch(emp);
       });
     });
+  }
+
+  function renderSummary() {
+    const key = getDateKey(viewDate);
+    const now = new Date();
+    const isToday = (getDateKey(now) === key);
+
+    let inside = 0;
+    let onShift = 0;
+    let noShift = 0;
+    let completed = 0;
+    let totalHoursMs = 0;
+
+    state.employees.forEach(emp => {
+      const rec = getEmpRecord(key, emp.id);
+      const shift = getShiftForEmployeeOnDate(emp, viewDate);
+
+      if (!shift) noShift += 1;
+
+      const isInside = !!rec.inTs && !rec.outTs;
+      const isCompleted = !!rec.inTs && !!rec.outTs;
+
+      if (isInside) inside += 1;
+      if (isCompleted) {
+        completed += 1;
+        totalHoursMs += Math.max(0, rec.outTs - rec.inTs);
+      }
+
+      if (shift && isToday && !rec.inTs && !rec.outTs && isWithinShiftNow(shift, now)) {
+        onShift += 1;
+      }
+    });
+
+    const total = state.employees.length;
+    const updateTime = fmtTime(now.getTime());
+
+    el.summarySub.textContent = `Fecha: ${key} · Actualizado ${updateTime}`;
+    el.summaryTotal.textContent = String(total);
+    el.summaryInside.textContent = String(inside);
+    el.summaryOnShift.textContent = String(onShift);
+    el.summaryNoShift.textContent = String(noShift);
+    el.summaryCompleted.textContent = String(completed);
+    el.summaryHours.textContent = fmtDuration(totalHoursMs);
   }
 
   function renderEvents() {
@@ -794,6 +861,7 @@
   function renderAll() {
     renderHeader();
     renderDateControls();
+    renderSummary();
     renderList();
     renderEvents();
   }
