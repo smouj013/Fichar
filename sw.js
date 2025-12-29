@@ -1,14 +1,16 @@
 /*
-  sw.js — ClockIn PWA v1.0 (offline-first simple)
-  Desarrollado por Smouj013
+  sw.js — PWA offline
+  Smouj013
 */
-const CACHE = "clockin-cache-v1";
+const CACHE = "fichaje-cache-v1";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
-  "./manifest.webmanifest"
+  "./manifest.webmanifest",
+  "./assets/icons/icon-192.png",
+  "./assets/icons/icon-512.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -31,14 +33,12 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Solo mismo origen
   if (url.origin !== location.origin) return;
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const cached = await cache.match(req);
 
-    // HTML: network-first (para updates)
     const isHTML = req.headers.get("accept")?.includes("text/html");
     if (isHTML) {
       try {
@@ -50,8 +50,8 @@ self.addEventListener("fetch", (event) => {
       }
     }
 
-    // Assets: cache-first
     if (cached) return cached;
+
     try {
       const fresh = await fetch(req);
       cache.put(req, fresh.clone()).catch(() => {});

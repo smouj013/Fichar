@@ -1,36 +1,47 @@
 <!doctype html>
 <!--
-  ClockIn — aplicación de fichaje
-  Desarrollado por Smouj013
+  Fichaje (PWA) — Smouj013
+  Entrada / Pausa / Volver / Salida + Resumen + Export CSV
 -->
-<html lang="es" data-theme="dark">
+<html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#0b0b10" />
-  <meta name="description" content="ClockIn — app para fichar (entrada/pausa/salida), calcular horas y exportar CSV." />
+  <meta name="description" content="App de fichaje: entrada/pausa/salida, resumen diario y exportación CSV." />
 
-  <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./styles.css" />
 
-  <title>ClockIn</title>
+  <title>Fichaje — Smouj013</title>
 </head>
 
 <body>
-  <div class="app">
+  <noscript>
+    <div class="noscript">
+      Necesitas JavaScript activado para usar esta app.
+    </div>
+  </noscript>
 
+  <!-- Banner si el JS no llega a cargar -->
+  <div class="jsfail" id="jsFail" hidden>
+    ⚠️ No se ha cargado app.js (o ha fallado). Abre la consola (F12) y revisa errores.
+    <div class="jsfail-sub">Comprueba que <b>app.js</b> está junto a <b>index.html</b> y que lo abres vía servidor (http://), no como file://</div>
+  </div>
+
+  <div class="app">
     <header class="topbar">
       <div class="brand">
         <div class="logo">⏱️</div>
         <div class="brandText">
-          <div class="title" id="companyName">ClockIn</div>
+          <div class="title" id="companyName">Fichaje</div>
           <div class="sub" id="employeeName">Sin usuario</div>
         </div>
       </div>
 
       <div class="topActions">
-        <button class="btn ghost" id="btnSettings" title="Ajustes">⚙️</button>
+        <button class="btn ghost" id="btnSettings" type="button" title="Ajustes">⚙️</button>
       </div>
     </header>
 
@@ -51,20 +62,20 @@
         </div>
 
         <div class="actionRow">
-          <button class="btn primary" id="btnIn">Entrar</button>
-          <button class="btn warn" id="btnBreakStart">Pausa</button>
-          <button class="btn warn" id="btnBreakEnd">Volver</button>
-          <button class="btn danger" id="btnOut">Salir</button>
+          <button class="btn primary" id="btnIn" type="button">Entrar</button>
+          <button class="btn warn" id="btnBreakStart" type="button">Pausa</button>
+          <button class="btn warn" id="btnBreakEnd" type="button">Volver</button>
+          <button class="btn danger" id="btnOut" type="button">Salir</button>
         </div>
 
         <div class="minorRow">
-          <input class="input" id="noteInput" placeholder="Nota opcional (ej: médico, reunión, etc.)" maxlength="120" />
-          <button class="btn" id="btnAddNote">Añadir nota al último</button>
+          <input class="input" id="noteInput" placeholder="Nota opcional (ej: reunión, médico…)" maxlength="120" />
+          <button class="btn" id="btnAddNote" type="button">Añadir nota</button>
         </div>
 
         <div class="integrityRow" id="integrityRow" hidden>
           <span class="badge bad">⚠️ Integridad</span>
-          <span class="integrityText" id="integrityText">Se detectó una inconsistencia en el historial.</span>
+          <span class="integrityText" id="integrityText">Inconsistencia detectada.</span>
         </div>
       </section>
 
@@ -72,12 +83,12 @@
         <div class="cardHead">
           <div>
             <div class="cardTitle">Resumen</div>
-            <div class="cardSub">Horas por día (entrada/salida + pausas)</div>
+            <div class="cardSub">Horas por día (trabajo y pausas)</div>
           </div>
 
           <div class="cardActions">
-            <button class="btn" id="btnExport">Exportar CSV</button>
-            <button class="btn ghost" id="btnClear">Borrar todo</button>
+            <button class="btn" id="btnExport" type="button">Exportar CSV</button>
+            <button class="btn ghost" id="btnClear" type="button">Borrar todo</button>
           </div>
         </div>
 
@@ -88,10 +99,10 @@
         <div class="cardHead">
           <div>
             <div class="cardTitle">Eventos</div>
-            <div class="cardSub">Registro cronológico (append-only)</div>
+            <div class="cardSub">Registro cronológico</div>
           </div>
           <div class="cardActions">
-            <button class="btn ghost" id="btnExportRaw">Exportar eventos (CSV)</button>
+            <button class="btn ghost" id="btnExportRaw" type="button">Exportar eventos (CSV)</button>
           </div>
         </div>
 
@@ -101,12 +112,12 @@
 
     <footer class="footer">
       <div class="footLeft">
-        <span class="pill" id="pwaPill">PWA</span>
-        <span class="pill" id="offlinePill">Offline listo</span>
-        <span class="pill" id="versionPill">v1.0</span>
+        <span class="pill">PWA</span>
+        <span class="pill">Offline</span>
+        <span class="pill">Smouj013</span>
       </div>
       <div class="footRight">
-        <button class="link" id="btnInstall" hidden>Instalar</button>
+        <button class="link" id="btnInstall" type="button" hidden>Instalar</button>
       </div>
     </footer>
   </div>
@@ -117,9 +128,9 @@
     <div class="modalHead">
       <div>
         <div class="modalTitle" id="settingsTitle">Ajustes</div>
-        <div class="modalSub">Nombre, empresa y opciones</div>
+        <div class="modalSub">Empresa, empleado y opciones</div>
       </div>
-      <button class="btn ghost" id="btnCloseSettings">✕</button>
+      <button class="btn ghost" id="btnCloseSettings" type="button">✕</button>
     </div>
 
     <div class="modalBody">
@@ -150,16 +161,25 @@
       </label>
 
       <div class="smallNote">
-        Consejo: para que el Service Worker funcione, abre con <b>http/https</b> (no file://).
+        Importante: para PWA/offline, abre con <b>http://</b> (servidor), no con <b>file://</b>.
       </div>
     </div>
 
     <div class="modalFoot">
-      <button class="btn ghost" id="btnCancelSettings">Cancelar</button>
-      <button class="btn primary" id="btnSaveSettings">Guardar</button>
+      <button class="btn ghost" id="btnCancelSettings" type="button">Cancelar</button>
+      <button class="btn primary" id="btnSaveSettings" type="button">Guardar</button>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script defer src="./app.js"></script>
+
+  <script>
+    // Si la app no marca "ready" en ~1.5s, mostramos aviso
+    setTimeout(() => {
+      if (!document.documentElement.dataset.appReady) {
+        document.getElementById("jsFail").hidden = false;
+      }
+    }, 1500);
+  </script>
 </body>
 </html>

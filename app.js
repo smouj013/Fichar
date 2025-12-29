@@ -1,20 +1,11 @@
 /*
-  app.js — lógica de la aplicación ClockIn
-  Desarrollado por Smouj013
+  app.js — Fichaje (PWA)
+  Smouj013
 */
 (() => {
   "use strict";
 
-  const g = (typeof globalThis !== "undefined") ? globalThis : window;
-  const LOAD_GUARD = "__CLOCKIN_APP_LOADED_V1";
-  try { if (g[LOAD_GUARD]) return; g[LOAD_GUARD] = true; } catch {}
-
-  const STORAGE_KEY = "clockin_state_v1";
-
-  /**
-   * @typedef {"IN"|"OUT"|"BREAK_START"|"BREAK_END"|"NOTE"} EventType
-   */
-
+  const STORAGE_KEY = "fichaje_state_v1";
   const $ = (id) => document.getElementById(id);
 
   const el = {
@@ -58,40 +49,22 @@
     btnInstall: $("btnInstall"),
   };
 
-  /** Estado */
-  const state = loadState();
+  // Si falta algún elemento, lo mostramos claro en consola.
+  for (const [k, v] of Object.entries(el)) {
+    if (!v) console.warn("[Fichaje] Elemento no encontrado:", k);
+  }
 
-  let deferredInstallPrompt = null;
-  let liveTimerHandle = null;
-
-  // ─────────────────────────────────────────────────────────────
-  // Utilidades
-  // ─────────────────────────────────────────────────────────────
   const pad2 = (n) => String(n).padStart(2, "0");
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
   const nowMs = () => Date.now();
-  const toISO = (ms) => new Date(ms).toISOString();
 
   const fmtDate = (ms) => {
     const d = new Date(ms);
-    // YYYY-MM-DD local
-    const y = d.getFullYear();
-    const m = pad2(d.getMonth() + 1);
-    const da = pad2(d.getDate());
-    return `${y}-${m}-${da}`;
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   };
 
   const fmtTime = (ms) => {
     const d = new Date(ms);
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-  };
-
-  const fmtHM = (mins) => {
-    const m = Math.max(0, mins | 0);
-    const h = Math.floor(m / 60);
-    const r = m % 60;
-    return `${h}h ${pad2(r)}m`;
   };
 
   const msToHMS = (ms) => {
@@ -103,15 +76,21 @@
     return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
   };
 
-  const safeText = (v) => (v == null ? "" : String(v));
+  const fmtHM = (mins) => {
+    const m = Math.max(0, mins | 0);
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    return `${h}h ${pad2(r)}m`;
+  };
 
-  // ─────────────────────────────────────────────────────────────
-  // Persistencia
-  // ─────────────────────────────────────────────────────────────
+  function makeId() {
+    return "id_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
+  }
+
   function defaultState() {
     return {
       settings: {
-        company: "ClockIn",
+        company: "Fichaje",
         employee: "Sin usuario",
         requirePin: false,
         pinSalt: "",
@@ -119,7 +98,7 @@
         saveGeo: false,
         deviceId: makeId(),
       },
-      events: /** @type {Array<any>} */ ([]),
+      events: [],
       integrityOK: true
     };
   }
@@ -139,6 +118,8 @@
     }
   }
 
+  const state = loadState();
+
   function saveState() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -149,13 +130,7 @@
     } catch {}
   }
 
-  function makeId() {
-    return "id_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Hash chain (integridad “básica”)
-  // ─────────────────────────────────────────────────────────────
+  // ——— Hash chain simple (integridad básica)
   async function sha256Hex(str) {
     if (!crypto?.subtle) return "";
     const data = new TextEncoder().encode(str);
@@ -192,13 +167,18 @@
     return true;
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // PIN (PBKDF2)
-  // ─────────────────────────────────────────────────────────────
+  // ——— PIN (PBKDF2)
   function randomSalt() {
     const arr = new Uint8Array(16);
     crypto.getRandomValues(arr);
     return [...arr].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function hexToBytes(hex) {
+    const clean = (hex || "").trim();
+    const out = new Uint8Array(clean.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
+    return out;
   }
 
   async function pbkdf2Hex(pin, saltHex) {
@@ -215,15 +195,6 @@
     return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
   }
 
-  function hexToBytes(hex) {
-    const clean = (hex || "").trim();
-    const out = new Uint8Array(clean.length / 2);
-    for (let i = 0; i < out.length; i++) {
-      out[i] = parseInt(clean.substr(i * 2, 2), 16);
-    }
-    return out;
-  }
-
   async function ensurePinAllowed() {
     if (!state.settings.requirePin) return true;
     const pin = prompt("Introduce el PIN para continuar:");
@@ -237,132 +208,20 @@
     return hash && (hash === target);
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Estado derivado: OUT / WORKING / BREAK
-  // ─────────────────────────────────────────────────────────────
+  // ——— Estado derivado
   function getDerivedStatus() {
-    const last = state.events[state.events.length - 1];
-    if (!last) return { mode: "OUT", since: 0 };
-
-    if (last.type === "OUT") return { mode: "OUT", since: last.ts };
-    if (last.type === "IN") return { mode: "WORKING", since: last.ts };
-    if (last.type === "BREAK_START") return { mode: "BREAK", since: last.ts };
-    if (last.type === "BREAK_END") return { mode: "WORKING", since: last.ts };
-
-    // NOTE no cambia modo: buscar último no-NOTE
     for (let i = state.events.length - 1; i >= 0; i--) {
       const ev = state.events[i];
-      if (ev.type !== "NOTE") {
-        return getDerivedStatusFrom(ev);
-      }
-    }
-    return { mode: "OUT", since: 0 };
-  }
-
-  function getDerivedStatusFrom(ev) {
-    if (!ev) return { mode: "OUT", since: 0 };
-    if (ev.type === "OUT") return { mode: "OUT", since: ev.ts };
-    if (ev.type === "IN") return { mode: "WORKING", since: ev.ts };
-    if (ev.type === "BREAK_START") return { mode: "BREAK", since: ev.ts };
-    if (ev.type === "BREAK_END") return { mode: "WORKING", since: ev.ts };
-    return { mode: "OUT", since: 0 };
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Cálculo de resumen diario
-  // ─────────────────────────────────────────────────────────────
-  function buildShifts() {
-    // Convierte eventos en “turnos” IN->OUT con pausas dentro.
-    /** @type {Array<any>} */
-    const shifts = [];
-    let cur = null;
-
-    for (const ev of state.events) {
       if (ev.type === "NOTE") continue;
-
-      if (ev.type === "IN") {
-        // Si hay turno abierto, lo cerramos “virtualmente” antes de abrir otro
-        if (cur && !cur.outTs) {
-          cur.outTs = ev.ts;
-          shifts.push(cur);
-        }
-        cur = { inTs: ev.ts, outTs: 0, breaks: [], notes: [] };
-      } else if (ev.type === "OUT") {
-        if (cur && !cur.outTs) {
-          cur.outTs = ev.ts;
-          shifts.push(cur);
-          cur = null;
-        } else {
-          // OUT sin IN: ignorar
-        }
-      } else if (ev.type === "BREAK_START") {
-        if (cur && !cur.outTs) {
-          cur.breaks.push({ start: ev.ts, end: 0 });
-        }
-      } else if (ev.type === "BREAK_END") {
-        if (cur && !cur.outTs) {
-          const b = cur.breaks[cur.breaks.length - 1];
-          if (b && !b.end) b.end = ev.ts;
-        }
-      }
+      if (ev.type === "OUT") return { mode: "OUT", since: ev.ts };
+      if (ev.type === "IN") return { mode: "WORKING", since: ev.ts };
+      if (ev.type === "BREAK_START") return { mode: "BREAK", since: ev.ts };
+      if (ev.type === "BREAK_END") return { mode: "WORKING", since: ev.ts };
     }
-
-    // Turno abierto: mantenlo abierto (para cálculo live)
-    if (cur && !cur.outTs) shifts.push(cur);
-
-    // Añadir notas al turno más cercano (simple: nota va al último turno)
-    const notes = state.events.filter(e => e.type === "NOTE");
-    if (notes.length) {
-      const lastShift = shifts[shifts.length - 1];
-      if (lastShift) lastShift.notes = notes.map(n => n.note).filter(Boolean);
-    }
-
-    return shifts;
+    return { mode: "OUT", since: 0 };
   }
 
-  function summarizeByDay(now = nowMs()) {
-    const shifts = buildShifts();
-    /** @type {Record<string, any>} */
-    const days = {};
-
-    for (const s of shifts) {
-      const inDay = fmtDate(s.inTs);
-      if (!days[inDay]) days[inDay] = { date: inDay, shifts: [], workMin: 0, breakMin: 0 };
-
-      const outTs = s.outTs || now; // turno abierto => ahora
-      const totalMin = Math.max(0, Math.floor((outTs - s.inTs) / 60000));
-
-      let breakMin = 0;
-      for (const b of s.breaks) {
-        const be = b.end || ((b.start && !b.end) ? now : 0);
-        if (b.start && be && be >= b.start) {
-          breakMin += Math.floor((be - b.start) / 60000);
-        }
-      }
-
-      const workMin = Math.max(0, totalMin - breakMin);
-
-      days[inDay].shifts.push({
-        inTs: s.inTs,
-        outTs: s.outTs,
-        totalMin,
-        breakMin,
-        workMin,
-        notes: (s.notes || []).slice(0, 4)
-      });
-
-      days[inDay].workMin += workMin;
-      days[inDay].breakMin += breakMin;
-    }
-
-    // Orden por fecha desc
-    const list = Object.values(days).sort((a, b) => (a.date < b.date ? 1 : -1));
-    return list;
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Registrar evento
-  // ─────────────────────────────────────────────────────────────
+  // ——— Geolocalización opcional
   async function getGeoIfEnabled() {
     if (!state.settings.saveGeo) return null;
     if (!navigator.geolocation) return null;
@@ -370,7 +229,6 @@
     return await new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          // Reduce precisión (privacidad): 3 decimales ~ 100m
           const lat = Math.round(pos.coords.latitude * 1000) / 1000;
           const lon = Math.round(pos.coords.longitude * 1000) / 1000;
           resolve({ lat, lon, acc: Math.round(pos.coords.accuracy || 0) });
@@ -390,7 +248,7 @@
       id: makeId(),
       ts,
       type,
-      note: safeText(note).slice(0, 120),
+      note: String(note ?? "").slice(0, 120),
       prevHash,
       hash: "",
       meta: {
@@ -409,9 +267,7 @@
     renderAll();
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Acciones (lógica “fichar”)
-  // ─────────────────────────────────────────────────────────────
+  // ——— Acciones
   async function doIn() {
     const s = getDerivedStatus();
     if (s.mode !== "OUT") return;
@@ -422,7 +278,6 @@
   async function doOut() {
     const s = getDerivedStatus();
     if (s.mode === "OUT") return;
-    // Si está en pausa, primero cerramos pausa
     if (s.mode === "BREAK") await addEvent("BREAK_END", "Auto-cierre pausa");
     await addEvent("OUT", el.noteInput.value.trim());
     el.noteInput.value = "";
@@ -442,31 +297,108 @@
     el.noteInput.value = "";
   }
 
-  async function addNoteToLast() {
+  async function addNote() {
     const note = el.noteInput.value.trim();
     if (!note) return;
     await addEvent("NOTE", note);
     el.noteInput.value = "";
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────
+  // ——— Turnos y resumen
+  function buildShifts() {
+    const shifts = [];
+    let cur = null;
+
+    for (const ev of state.events) {
+      if (ev.type === "NOTE") continue;
+
+      if (ev.type === "IN") {
+        if (cur && !cur.outTs) {
+          cur.outTs = ev.ts;
+          shifts.push(cur);
+        }
+        cur = { inTs: ev.ts, outTs: 0, breaks: [], notes: [] };
+      } else if (ev.type === "OUT") {
+        if (cur && !cur.outTs) {
+          cur.outTs = ev.ts;
+          shifts.push(cur);
+          cur = null;
+        }
+      } else if (ev.type === "BREAK_START") {
+        if (cur && !cur.outTs) cur.breaks.push({ start: ev.ts, end: 0 });
+      } else if (ev.type === "BREAK_END") {
+        if (cur && !cur.outTs) {
+          const b = cur.breaks[cur.breaks.length - 1];
+          if (b && !b.end) b.end = ev.ts;
+        }
+      }
+    }
+
+    if (cur && !cur.outTs) shifts.push(cur);
+
+    // notas (simple): las ponemos en el último turno
+    const notes = state.events.filter(e => e.type === "NOTE");
+    const lastShift = shifts[shifts.length - 1];
+    if (lastShift) lastShift.notes = notes.map(n => n.note).filter(Boolean);
+
+    return shifts;
+  }
+
+  function summarizeByDay(now = nowMs()) {
+    const shifts = buildShifts();
+    const days = {};
+
+    for (const s of shifts) {
+      const dayKey = fmtDate(s.inTs);
+      if (!days[dayKey]) days[dayKey] = { date: dayKey, shifts: [], workMin: 0, breakMin: 0 };
+
+      const outTs = s.outTs || now;
+      const totalMin = Math.max(0, Math.floor((outTs - s.inTs) / 60000));
+
+      let breakMin = 0;
+      for (const b of s.breaks) {
+        const be = b.end || now;
+        if (b.start && be && be >= b.start) breakMin += Math.floor((be - b.start) / 60000);
+      }
+
+      const workMin = Math.max(0, totalMin - breakMin);
+
+      days[dayKey].shifts.push({
+        inTs: s.inTs,
+        outTs: s.outTs,
+        totalMin,
+        breakMin,
+        workMin,
+        notes: (s.notes || []).slice(0, 4)
+      });
+
+      days[dayKey].workMin += workMin;
+      days[dayKey].breakMin += breakMin;
+    }
+
+    return Object.values(days).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }
+
+  // ——— Render
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
   function setButtonsByStatus() {
     const s = getDerivedStatus();
-    const out = (s.mode === "OUT");
-    const working = (s.mode === "WORKING");
-    const brk = (s.mode === "BREAK");
-
-    el.btnIn.disabled = !out;
-    el.btnOut.disabled = out;
-
-    el.btnBreakStart.disabled = !working;
-    el.btnBreakEnd.disabled = !brk;
+    el.btnIn.disabled = (s.mode !== "OUT");
+    el.btnOut.disabled = (s.mode === "OUT");
+    el.btnBreakStart.disabled = (s.mode !== "WORKING");
+    el.btnBreakEnd.disabled = (s.mode !== "BREAK");
   }
 
   function renderHeader() {
-    el.companyName.textContent = state.settings.company || "ClockIn";
+    el.companyName.textContent = state.settings.company || "Fichaje";
     el.employeeName.textContent = state.settings.employee || "Sin usuario";
   }
 
@@ -478,29 +410,24 @@
 
     if (s.mode === "OUT") {
       label = "Fuera";
-      if (s.since) meta = `Última salida: ${fmtDate(s.since)} ${fmtTime(s.since)}`;
       hint = "Pulsa Entrar para iniciar turno";
+      if (s.since) meta = `Última salida: ${fmtDate(s.since)} ${fmtTime(s.since)}`;
+      el.timerText.textContent = "00:00:00";
     } else if (s.mode === "WORKING") {
       label = "Trabajando";
       meta = `Desde: ${fmtDate(s.since)} ${fmtTime(s.since)}`;
       hint = "Pausa para descansar / Salir para terminar";
+      el.timerText.textContent = msToHMS(now - s.since);
     } else if (s.mode === "BREAK") {
       label = "En pausa";
       meta = `Desde: ${fmtDate(s.since)} ${fmtTime(s.since)}`;
       hint = "Pulsa Volver para retomar";
+      el.timerText.textContent = msToHMS(now - s.since);
     }
 
     el.statusText.textContent = label;
     el.statusMeta.textContent = meta;
-
-    // Timer: si trabajando o pausa => elapsed desde since
-    if (s.mode === "OUT" || !s.since) {
-      el.timerText.textContent = "00:00:00";
-      el.timerHint.textContent = hint;
-    } else {
-      el.timerText.textContent = msToHMS(now - s.since);
-      el.timerHint.textContent = hint;
-    }
+    el.timerHint.textContent = hint;
   }
 
   function renderIntegrity() {
@@ -509,7 +436,7 @@
       return;
     }
     el.integrityRow.hidden = false;
-    el.integrityText.textContent = "Se detectó una inconsistencia. Si editaste el storage o hubo un fallo, exporta y reinicia.";
+    el.integrityText.textContent = "Se detectó inconsistencia en el historial.";
   }
 
   function renderDays(now = nowMs()) {
@@ -522,7 +449,7 @@
     el.days.innerHTML = list.map(day => {
       const lines = day.shifts.map((s, idx) => {
         const outTxt = s.outTs ? `${fmtTime(s.outTs)}` : "— (en curso)";
-        const notes = (s.notes && s.notes.length) ? ` · Notas: ${s.notes.join(" | ")}` : "";
+        const notes = (s.notes && s.notes.length) ? ` · Notas: ${escapeHtml(s.notes.join(" | "))}` : "";
         return `
           <div class="line">
             <div><b>Turno ${idx + 1}</b> · ${fmtTime(s.inTs)} → ${outTxt}</div>
@@ -578,15 +505,6 @@
     }).join("");
   }
 
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
   function renderAll() {
     renderHeader();
     renderIntegrity();
@@ -596,18 +514,13 @@
     renderEvents();
   }
 
-  function startLiveTimer() {
-    if (liveTimerHandle) clearInterval(liveTimerHandle);
-    liveTimerHandle = setInterval(() => {
-      renderStatus(nowMs());
-      renderDays(nowMs()); // para turnos en curso
-      setButtonsByStatus();
-    }, 500);
+  // ——— CSV export
+  function csvEscape(v) {
+    const s = String(v ?? "");
+    if (/[",\n\r]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
+    return s;
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Export CSV
-  // ─────────────────────────────────────────────────────────────
   function downloadText(filename, text, mime = "text/plain;charset=utf-8") {
     const blob = new Blob([text], { type: mime });
     const url = URL.createObjectURL(blob);
@@ -617,25 +530,18 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  }
-
-  function csvEscape(v) {
-    const s = String(v ?? "");
-    if (/[",\n\r]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
-    return s;
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   async function exportSummaryCSV() {
     if (!(await ensurePinAllowed())) return;
-
     const now = nowMs();
     const days = summarizeByDay(now);
 
     const header = ["fecha", "turno", "entrada", "salida", "pausa_min", "trabajo_min", "notas"].join(",");
     const rows = [header];
 
-    for (const d of days.slice().reverse()) { // ascendente
+    for (const d of days.slice().reverse()) {
       d.shifts.forEach((s, i) => {
         rows.push([
           d.date,
@@ -650,7 +556,7 @@
     }
 
     const name = (state.settings.employee || "empleado").replaceAll(" ", "_");
-    downloadText(`clockin_resumen_${name}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
+    downloadText(`fichaje_resumen_${name}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
   }
 
   async function exportRawCSV() {
@@ -660,7 +566,7 @@
     const rows = [header];
 
     for (const ev of state.events) {
-      const iso = toISO(ev.ts);
+      const iso = new Date(ev.ts).toISOString();
       const geo = ev.meta?.geo ? `${ev.meta.geo.lat},${ev.meta.geo.lon}` : "";
       rows.push([
         iso,
@@ -676,12 +582,10 @@
     }
 
     const name = (state.settings.employee || "empleado").replaceAll(" ", "_");
-    downloadText(`clockin_eventos_${name}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
+    downloadText(`fichaje_eventos_${name}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Ajustes modal
-  // ─────────────────────────────────────────────────────────────
+  // ——— Ajustes modal
   function openSettings() {
     el.inpCompany.value = state.settings.company || "";
     el.inpEmployee.value = state.settings.employee || "";
@@ -699,7 +603,7 @@
   }
 
   async function saveSettingsFromUI() {
-    const company = el.inpCompany.value.trim().slice(0, 40) || "ClockIn";
+    const company = el.inpCompany.value.trim().slice(0, 40) || "Fichaje";
     const employee = el.inpEmployee.value.trim().slice(0, 40) || "Sin usuario";
     const requirePin = !!el.chkPin.checked;
     const saveGeo = !!el.chkGeo.checked;
@@ -709,7 +613,6 @@
     state.settings.requirePin = requirePin;
     state.settings.saveGeo = saveGeo;
 
-    // Si PIN activado y han escrito uno nuevo, lo guardamos
     const newPin = el.inpPin.value.trim();
     if (requirePin) {
       if (newPin.length >= 4 && newPin.length <= 10 && /^\d+$/.test(newPin)) {
@@ -722,7 +625,6 @@
         return;
       }
     } else {
-      // PIN desactivado => borramos
       state.settings.pinSalt = "";
       state.settings.pinHash = "";
     }
@@ -732,25 +634,19 @@
     renderAll();
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Borrado
-  // ─────────────────────────────────────────────────────────────
   async function clearAll() {
     if (!(await ensurePinAllowed())) return;
-    const ok = confirm("¿Seguro que quieres borrar TODO el historial?");
-    if (!ok) return;
-
+    if (!confirm("¿Seguro que quieres borrar TODO el historial?")) return;
     state.events = [];
     state.integrityOK = true;
     saveState();
     renderAll();
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // PWA install prompt + SW
-  // ─────────────────────────────────────────────────────────────
+  // ——— PWA install + SW
+  let deferredInstallPrompt = null;
+
   function setupPWA() {
-    // Service worker
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     }
@@ -758,10 +654,10 @@
     window.addEventListener("beforeinstallprompt", (e) => {
       e.preventDefault();
       deferredInstallPrompt = e;
-      el.btnInstall.hidden = false;
+      if (el.btnInstall) el.btnInstall.hidden = false;
     });
 
-    el.btnInstall.addEventListener("click", async () => {
+    el.btnInstall?.addEventListener("click", async () => {
       if (!deferredInstallPrompt) return;
       deferredInstallPrompt.prompt();
       try { await deferredInstallPrompt.userChoice; } catch {}
@@ -770,51 +666,48 @@
     });
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Bindings
-  // ─────────────────────────────────────────────────────────────
+  // ——— Bind UI
   function bindUI() {
     el.btnIn.addEventListener("click", doIn);
     el.btnOut.addEventListener("click", doOut);
     el.btnBreakStart.addEventListener("click", doBreakStart);
     el.btnBreakEnd.addEventListener("click", doBreakEnd);
-
-    el.btnAddNote.addEventListener("click", addNoteToLast);
+    el.btnAddNote.addEventListener("click", addNote);
 
     el.btnExport.addEventListener("click", exportSummaryCSV);
     el.btnExportRaw.addEventListener("click", exportRawCSV);
-
     el.btnClear.addEventListener("click", clearAll);
 
     el.btnSettings.addEventListener("click", openSettings);
     el.btnCloseSettings.addEventListener("click", closeSettings);
     el.btnCancelSettings.addEventListener("click", closeSettings);
     el.settingsBackdrop.addEventListener("click", closeSettings);
-
     el.btnSaveSettings.addEventListener("click", saveSettingsFromUI);
 
-    // Atajos
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeSettings();
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e") {
-        e.preventDefault();
-        exportSummaryCSV();
-      }
     });
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Boot
-  // ─────────────────────────────────────────────────────────────
+  function startLiveTimer() {
+    setInterval(() => {
+      renderStatus(nowMs());
+      renderDays(nowMs());
+      setButtonsByStatus();
+    }, 500);
+  }
+
+  // ——— Boot
   (async function boot() {
+    console.log("[Fichaje] init Smouj013");
+    await verifyChain();
     bindUI();
     setupPWA();
-
-    // Verifica cadena si hay crypto
-    await verifyChain();
-
     renderAll();
     startLiveTimer();
+
+    // Marcamos "ready" para que no salga el banner de error en index.html
+    document.documentElement.dataset.appReady = "1";
   })();
 
 })();
