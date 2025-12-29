@@ -1,14 +1,15 @@
-/* sw.js — ClockIn v2.0.1 (AUTO-UPDATE estable + offline)
+/* sw.js — ClockIn v2.0.3 (AUTO-UPDATE estable + OFFLINE)
    - Precaching tolerante (no rompe install si falta un archivo)
-   - Navegación: network-first con timeout + fallback cache
+   - Navegación: network-first con timeout + fallback cache (ignoreSearch)
    - Estáticos: cache-first + refresh background (stale refresh)
    - Runtime: stale-while-revalidate
+   - Cleanup de caches antiguos + clients.claim
 */
 
 (() => {
   "use strict";
 
-  const VERSION = "2.0.1";
+  const VERSION = "2.0.3";
   const CACHE = `clockin-${VERSION}`;
 
   // Precaching (misma ruta/origen)
@@ -17,6 +18,7 @@
     "./index.html",
     "./styles.css",
     "./app.js",
+    "./sw.js",
     "./manifest.webmanifest",
     "./assets/icons/favicon-32.png",
     "./assets/icons/apple-touch-icon-152.png",
@@ -28,49 +30,82 @@
     "./assets/icons/icon-512-maskable.png"
   ];
 
-  async function safePrecache(cache){
-    // No dejes que un archivo faltante rompa el install.
-    const reqs = CORE.map(u => new Request(u, { cache: "reload" }));
-    await Promise.allSettled(reqs.map(async (req) => {
-      try{
-        const res = await fetch(req);
-        if (!res || !res.ok) return;
-        await cache.put(req, res.clone());
-      }catch(_){}
-    }));
+  function isOkResponse(res) {
+    return !!res && (res.ok || res.type === "opaque");
+  }
+
+  async function safePrecache(cache) {
+    const reqs = CORE.map((u) => new Request(u, { cache: "reload" }));
+    await Promise.allSettled(
+      reqs.map(async (req) => {
+        try {
+          const res = await fetch(req);
+          if (!isOkResponse(res)) return;
+          await cache.put(req, res.clone());
+        } catch (_) {}
+      })
+    );
   }
 
   self.addEventListener("install", (e) => {
     e.waitUntil((async () => {
       const c = await caches.open(CACHE);
       await safePrecache(c);
-      // No skipWaiting aquí: reduce loops raros en iOS
+      // No skipWaiting aquí: reduce loops raros en algunos navegadores.
     })());
   });
 
   self.addEventListener("activate", (e) => {
     e.waitUntil((async () => {
+      // Navigation Preload (si existe)
+      try {
+        if (self.registration && self.registration.navigationPreload) {
+          await self.registration.navigationPreload.enable();
+        }
+      } catch (_) {}
+
+      // Limpia caches anteriores
       const keys = await caches.keys();
-      await Promise.all(keys.map(k => (k !== CACHE ? caches.delete(k) : null)));
+      await Promise.all(keys.map((k) => (k !== CACHE ? caches.delete(k) : null)));
+
       await self.clients.claim();
     })());
   });
 
   self.addEventListener("message", (e) => {
-    if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting();
+    if (e.data && e.data.type === "SKIP_WAITING") {
+      try { self.skipWaiting(); } catch (_) {}
+    }
   });
 
-  async function fetchWithTimeout(req, ms){
+  async function fetchWithTimeout(req, ms) {
     const ctl = new AbortController();
-    const t = setTimeout(()=>ctl.abort(), ms);
-    try{
+    const t = setTimeout(() => ctl.abort(), ms);
+    try {
       const res = await fetch(req, { signal: ctl.signal });
       clearTimeout(t);
       return res;
-    }catch(err){
+    } catch (err) {
       clearTimeout(t);
       throw err;
     }
+  }
+
+  function isStaticAsset(url) {
+    const p = url.pathname;
+    return (
+      p.endsWith(".js") ||
+      p.endsWith(".css") ||
+      p.endsWith(".webmanifest") ||
+      p.endsWith(".png") ||
+      p.endsWith(".svg") ||
+      p.endsWith(".ico") ||
+      p.endsWith(".jpg") ||
+      p.endsWith(".jpeg") ||
+      p.endsWith(".webp") ||
+      p.endsWith(".woff") ||
+      p.endsWith(".woff2")
+    );
   }
 
   self.addEventListener("fetch", (e) => {
@@ -80,60 +115,75 @@
     const url = new URL(req.url);
     if (url.origin !== self.location.origin) return;
 
-    // Navegación: network-first, fallback cache (ignoreSearch)
+    // ── Navegación: network-first + fallback cache
     if (req.mode === "navigate") {
       e.respondWith((async () => {
         const c = await caches.open(CACHE);
+
+        // Usa navigation preload si está disponible
+        const preload = (async () => {
+          try { return await e.preloadResponse; } catch (_) { return null; }
+        })();
+
         try {
+          const pre = await preload;
+          if (pre && isOkResponse(pre)) {
+            // Cachea index como fallback offline
+            try {
+              await c.put(new Request("./index.html", { cache: "reload" }), pre.clone());
+            } catch (_) {}
+            return pre;
+          }
+
           const fresh = await fetchWithTimeout(req, 4500);
-          // guarda index para offline
-          c.put("./index.html", fresh.clone()).catch(()=>{});
+          if (isOkResponse(fresh)) {
+            try {
+              await c.put(new Request("./index.html", { cache: "reload" }), fresh.clone());
+            } catch (_) {}
+          }
           return fresh;
         } catch (_) {
-          return (await c.match("./index.html", { ignoreSearch: true }))
-            || (await c.match("./", { ignoreSearch: true }))
-            || Response.error();
+          return (
+            (await c.match("./index.html", { ignoreSearch: true })) ||
+            (await c.match("./", { ignoreSearch: true })) ||
+            new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } })
+          );
         }
       })());
       return;
     }
 
-    // Estáticos: cache-first + refresh en background
-    const isStatic = (
-      url.pathname.endsWith(".js") ||
-      url.pathname.endsWith(".css") ||
-      url.pathname.endsWith(".webmanifest") ||
-      url.pathname.endsWith(".png") ||
-      url.pathname.endsWith(".svg") ||
-      url.pathname.endsWith(".ico")
-    );
-
-    if (isStatic) {
+    // ── Estáticos: cache-first + refresh background
+    if (isStaticAsset(url)) {
       e.respondWith((async () => {
         const c = await caches.open(CACHE);
         const cached = await c.match(req, { ignoreSearch: true });
 
-        const net = fetch(req).then(res => {
-          if (res && res.ok) c.put(req, res.clone()).catch(()=>{});
+        const net = fetch(req).then(async (res) => {
+          if (isOkResponse(res)) {
+            try { await c.put(req, res.clone()); } catch (_) {}
+          }
           return res;
-        }).catch(()=>null);
+        }).catch(() => null);
 
-        return cached || (await net) || Response.error();
+        return cached || (await net) || new Response("", { status: 504 });
       })());
       return;
     }
 
-    // Default runtime: stale-while-revalidate
+    // ── Runtime: stale-while-revalidate
     e.respondWith((async () => {
       const c = await caches.open(CACHE);
       const cached = await c.match(req);
 
-      const net = fetch(req).then(res => {
-        if (res && res.ok) c.put(req, res.clone()).catch(()=>{});
+      const net = fetch(req).then(async (res) => {
+        if (isOkResponse(res)) {
+          try { await c.put(req, res.clone()); } catch (_) {}
+        }
         return res;
-      }).catch(()=>null);
+      }).catch(() => null);
 
-      return cached || (await net) || Response.error();
+      return cached || (await net) || new Response("", { status: 504 });
     })());
   });
 

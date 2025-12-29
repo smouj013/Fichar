@@ -7,10 +7,10 @@
   --radius-sm: 10px;
 
   --shadow-1: 0 10px 30px rgba(0,0,0,.30);
-  --shadow-2: 0 14px 44px rgba(0,0,0,.42);
+  --shadow-2: 0 14px 44px rgba(32, 30, 30, 0.42);
   --shadow-inset: inset 0 1px 0 rgba(255,255,255,.06);
 
-  --border: rgba(255,255,255,.10);
+  --border: rgba(125, 14, 14, 0.1);
   --border-2: rgba(255,255,255,.14);
   --blur: 14px;
 
@@ -27,7 +27,7 @@
   --warn: 255 193 82;
   --ok: 110 244 181;
 
-  --bg: #0b0b10;
+  --bg: #271a1a;
   --panel: rgba(255,255,255,.06);
   --panel-2: rgba(255,255,255,.08);
   --text: rgba(255,255,255,.92);
@@ -107,8 +107,8 @@ body{
   background:
     radial-gradient(closest-side at 28% 22%, rgba(var(--acc2),.35), transparent 58%),
     radial-gradient(closest-side at 74% 32%, rgba(var(--acc),.30), transparent 62%),
-    radial-gradient(closest-side at 42% 78%, rgba(200,120,255,.22), transparent 62%),
-    radial-gradient(closest-side at 82% 82%, rgba(255,140,80,.16), transparent 58%);
+    radial-gradient(closest-side at 42% 78%, rgba(131, 15, 15, 0.22), transparent 62%),
+    radial-gradient(closest-side at 82% 82%, rgba(17, 61, 15, 0.16), transparent 58%);
   animation: glowDrift 14s var(--ease-out) infinite alternate;
 }
 .bg-glow::after{

@@ -1,4 +1,4 @@
-/* app.js — ClockIn v2.0.1 (STABLE + UI PRO + PWA + AUTO-UPDATE)
+/* app.js — ClockIn v2.0.3 (STABLE + UI PRO + PWA + INSTALL + AUTO-UPDATE)
    ✅ Features:
    - Empleados + horario semanal por día
    - Fichaje: Entrada/Salida + Pausas (inicio/fin)
@@ -7,24 +7,25 @@
    - Backup/Restore JSON
    - PIN opcional (protege borrar/import/export)
    - Geolocalización opcional (guardada en eventos)
-   - Detección: móvil/desktop + standalone PWA
+   - Detección: móvil/desktop + standalone PWA + botón Instalar (Chromium)
    - Auto-update robusto: pill + opción auto-aplicar (anti-loops)
+   - FIX Opera GX: el splash NUNCA bloquea la UI (se fuerza hidden + pointer events)
 */
 
 (() => {
   "use strict";
 
   // ───────────────────────── Version / Guard ─────────────────────────
-  const APP_VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.0.1");
+  const APP_VERSION = String((typeof window !== "undefined" && window.APP_VERSION) || "2.0.3");
   const g = (typeof globalThis !== "undefined") ? globalThis : window;
-  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V201";
+  const LOAD_GUARD = "__CLOCKIN_APPJS_LOADED_V203";
   try { if (g && g[LOAD_GUARD]) return; if (g) g[LOAD_GUARD] = true; } catch (_) {}
 
   // ───────────────────────── Storage ─────────────────────────
   const STORAGE_KEY = "clockin_state_v2";
   const LEGACY_KEYS = ["clockin_state_v1", "clockin_state_v1_0", "clockin_state_v1.0.0"];
 
-  // Días semana (ISO: lunes=1)
+  // Días semana (ISO-like: lunes primero para UI)
   const DOW_KEYS = ["mon","tue","wed","thu","fri","sat","sun"];
   const DOW_LABEL = { mon:"Lun", tue:"Mar", wed:"Mié", thu:"Jue", fri:"Vie", sat:"Sáb", sun:"Dom" };
 
@@ -53,12 +54,14 @@
   }
 
   function nowMs(){ return Date.now(); }
+
   function toISODate(d){
     const y = d.getFullYear();
     const m = pad2(d.getMonth()+1);
     const day = pad2(d.getDate());
     return `${y}-${m}-${day}`;
   }
+
   function fromISODate(s){
     const [y,m,d] = (s||"").split("-").map(x=>parseInt(x,10));
     if (!y || !m || !d) return null;
@@ -73,6 +76,7 @@
       return d.toLocaleDateString();
     }
   }
+
   function fmtTime(d){
     try {
       return new Intl.DateTimeFormat("es-ES", { hour:"2-digit", minute:"2-digit" }).format(d);
@@ -80,6 +84,7 @@
       return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
     }
   }
+
   function fmtHMFromMinutes(mins){
     mins = Math.max(0, mins|0);
     const h = Math.floor(mins/60);
@@ -104,7 +109,7 @@
     return toISODate(d) === iso;
   }
 
-  // Hash corto (FNV-1a 32-bit) para mostrar “hash”
+  // Hash corto (FNV-1a 32-bit)
   function fnv1a(str){
     let h = 0x811c9dc5;
     for (let i=0;i<str.length;i++){
@@ -162,57 +167,22 @@
         compact: false,
         haptics: true,
         geoEnabled: false,
-        pin: {                   // PIN opcional
+        pin: {                    // PIN opcional
           enabled: false,
           salt: "",
           hash: "",
-          lastOkAt: 0            // “sesión” de verificación local
+          lastOkAt: 0
         }
       },
-      employees: [
-        // { id, name, schedule }
-      ],
-      events: [
-        // { id, ts, empId, type, note, geo, hash }
-      ]
+      employees: [],
+      events: []
     };
-  }
-
-  function migrateLegacyIfNeeded(){
-    for (const k of LEGACY_KEYS){
-      const raw = localStorage.getItem(k);
-      if (!raw) continue;
-      // Si hay legacy y no hay v2, intentamos migrar de forma “best-effort”
-      if (!localStorage.getItem(STORAGE_KEY)){
-        const old = safeJsonParse(raw, null);
-        if (old && typeof old === "object"){
-          const st = defaultState();
-          // Campos “probables”
-          if (Array.isArray(old.employees)) st.employees = old.employees.map(e => ({
-            id: String(e.id || uid()),
-            name: String(e.name || "Empleado"),
-            schedule: e.schedule && typeof e.schedule === "object" ? normalizeSchedule(e.schedule) : defaultSchedule(),
-          }));
-          if (Array.isArray(old.events)) st.events = old.events.map(ev => ({
-            id: String(ev.id || uid()),
-            ts: Number(ev.ts || nowMs()),
-            empId: String(ev.empId || ""),
-            type: String(ev.type || EVT.IN),
-            note: String(ev.note || ""),
-            geo: ev.geo || null,
-            hash: fnv1a(String(ev.id || "") + "|" + String(ev.ts || "")),
-          })).filter(x=>x.empId);
-          saveState(st);
-        }
-      }
-      try { localStorage.removeItem(k); } catch(_) {}
-    }
   }
 
   function normalizeSchedule(s){
     const out = defaultSchedule();
     for (const k of DOW_KEYS){
-      const d = s[k];
+      const d = s && s[k];
       if (!d) continue;
       out[k] = {
         enabled: !!d.enabled,
@@ -223,30 +193,75 @@
     return out;
   }
 
+  function migrateLegacyIfNeeded(){
+    for (const k of LEGACY_KEYS){
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+
+      if (!localStorage.getItem(STORAGE_KEY)){
+        const old = safeJsonParse(raw, null);
+        if (old && typeof old === "object"){
+          const st = defaultState();
+
+          if (Array.isArray(old.employees)){
+            st.employees = old.employees.map(e => ({
+              id: String(e.id || uid()),
+              name: String(e.name || "Empleado"),
+              schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
+            }));
+          }
+
+          if (Array.isArray(old.events)){
+            st.events = old.events.map(ev => ({
+              id: String(ev.id || uid()),
+              ts: Number(ev.ts || nowMs()),
+              empId: String(ev.empId || ""),
+              type: String(ev.type || EVT.IN),
+              note: typeof ev.note === "string" ? ev.note : "",
+              geo: ev.geo || null,
+              hash: String(ev.hash || fnv1a(String(ev.id || "") + "|" + String(ev.ts || "")))
+            })).filter(x => x.empId && Number.isFinite(x.ts));
+          }
+
+          saveState(st);
+        }
+      }
+
+      try { localStorage.removeItem(k); } catch (_) {}
+    }
+  }
+
   function loadState(){
     migrateLegacyIfNeeded();
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? safeJsonParse(raw, null) : null;
     if (!parsed || typeof parsed !== "object") return defaultState();
 
-    // “Soft repair” de schema
-    const st = Object.assign(defaultState(), parsed);
-    st.settings = Object.assign(defaultState().settings, parsed.settings || {});
-    st.settings.pin = Object.assign(defaultState().settings.pin, (parsed.settings && parsed.settings.pin) || {});
-    st.employees = Array.isArray(parsed.employees) ? parsed.employees.map(e => ({
-      id: String(e.id || uid()),
-      name: String(e.name || "Empleado"),
-      schedule: e.schedule && typeof e.schedule === "object" ? normalizeSchedule(e.schedule) : defaultSchedule()
-    })) : [];
-    st.events = Array.isArray(parsed.events) ? parsed.events.map(ev => ({
-      id: String(ev.id || uid()),
-      ts: Number(ev.ts || nowMs()),
-      empId: String(ev.empId || ""),
-      type: String(ev.type || EVT.IN),
-      note: typeof ev.note === "string" ? ev.note : "",
-      geo: ev.geo || null,
-      hash: String(ev.hash || fnv1a(String(ev.id||"") + "|" + String(ev.ts||"")))
-    })).filter(x=>x.empId && Number.isFinite(x.ts)) : [];
+    const base = defaultState();
+    const st = Object.assign(base, parsed);
+
+    st.settings = Object.assign(base.settings, parsed.settings || {});
+    st.settings.pin = Object.assign(base.settings.pin, (parsed.settings && parsed.settings.pin) || {});
+
+    st.employees = Array.isArray(parsed.employees)
+      ? parsed.employees.map(e => ({
+          id: String(e.id || uid()),
+          name: String(e.name || "Empleado"),
+          schedule: (e.schedule && typeof e.schedule === "object") ? normalizeSchedule(e.schedule) : defaultSchedule()
+        }))
+      : [];
+
+    st.events = Array.isArray(parsed.events)
+      ? parsed.events.map(ev => ({
+          id: String(ev.id || uid()),
+          ts: Number(ev.ts || nowMs()),
+          empId: String(ev.empId || ""),
+          type: String(ev.type || EVT.IN),
+          note: typeof ev.note === "string" ? ev.note : "",
+          geo: ev.geo || null,
+          hash: String(ev.hash || fnv1a(String(ev.id||"") + "|" + String(ev.ts||"")))
+        })).filter(x => x.empId && Number.isFinite(x.ts))
+      : [];
 
     st.schema = 2;
     st.version = APP_VERSION;
@@ -268,22 +283,28 @@
   function toast(kind, msg, sub){
     // kind: info|ok|warn|error
     if (!toasts) return;
+
     const t = el("div", "toast");
-    const ic = el("div", "ticon");
-    const icon = el("span", "ms");
-    icon.textContent =
+    const ic = el("span", "ms");
+    ic.textContent =
       kind === "ok" ? "check_circle" :
       kind === "warn" ? "warning" :
       kind === "error" ? "error" : "info";
-    ic.appendChild(icon);
 
     const body = el("div");
-    const m = el("div", "tmsg");
+    const m = el("div");
+    m.style.fontWeight = "900";
+    m.style.marginBottom = sub ? "4px" : "0";
     m.textContent = msg || "";
-    const s = el("div", "tsub");
-    s.textContent = sub || "";
+
     body.appendChild(m);
-    if (sub) body.appendChild(s);
+
+    if (sub){
+      const s = el("div", "muted");
+      s.style.fontSize = "12px";
+      s.textContent = sub || "";
+      body.appendChild(s);
+    }
 
     t.appendChild(ic);
     t.appendChild(body);
@@ -300,15 +321,26 @@
 
   let modalResolve = null;
 
+  function hardHideBackdrop(){
+    if (!modalBackdrop) return;
+    modalBackdrop.hidden = true;
+    modalBackdrop.style.display = "none";
+    document.body.classList.remove("modal-open");
+  }
+
   function closeModal(){
     if (!modalBackdrop) return;
     modalBackdrop.classList.remove("is-open");
+
     setTimeout(() => {
       modalBackdrop.hidden = true;
+      modalBackdrop.style.display = "none";
       document.body.classList.remove("modal-open");
+
       if (modalTitle) modalTitle.textContent = "—";
       if (modalBody) modalBody.innerHTML = "";
       if (modalActions) modalActions.innerHTML = "";
+
       if (typeof modalResolve === "function") {
         modalResolve(null);
         modalResolve = null;
@@ -318,7 +350,10 @@
 
   function openModal({ title, contentNode, actions=[] }){
     if (!modalBackdrop) return Promise.resolve(null);
+
+    modalBackdrop.style.display = "grid";
     modalBackdrop.hidden = false;
+
     requestAnimationFrame(() => modalBackdrop.classList.add("is-open"));
     document.body.classList.add("modal-open");
 
@@ -329,20 +364,10 @@
     }
     if (modalActions){
       modalActions.innerHTML = "";
-      for (const a of actions){
-        modalActions.appendChild(a);
-      }
+      for (const a of actions) modalActions.appendChild(a);
     }
 
     return new Promise((resolve) => { modalResolve = resolve; });
-  }
-
-  function btn(text, cls, onClick){
-    const b = el("button", cls || "btn");
-    b.type = "button";
-    b.textContent = text;
-    if (onClick) b.addEventListener("click", onClick);
-    return b;
   }
 
   function btnIcon(label, iconName, cls, onClick){
@@ -391,7 +416,6 @@
     const pin = st.settings.pin;
     if (!pin || !pin.enabled) return true;
 
-    // Ventana de “sesión” local (10 min)
     const SESSION_MS = 10 * 60 * 1000;
     if (pin.lastOkAt && (nowMs() - pin.lastOkAt) < SESSION_MS) return true;
 
@@ -399,16 +423,18 @@
     const p = el("div", "muted");
     p.style.lineHeight = "1.55";
     p.textContent = `Introduce el PIN para ${purposeLabel || "continuar"}.`;
+
     const field = el("label", "field");
-    const span = el("span");
-    span.textContent = "PIN";
+    const span = el("span"); span.textContent = "PIN";
     const input = document.createElement("input");
     input.type = "password";
     input.inputMode = "numeric";
     input.autocomplete = "one-time-code";
     input.placeholder = "••••";
+
     field.appendChild(span);
     field.appendChild(input);
+
     wrap.appendChild(p);
     wrap.appendChild(el("div")).style.height = "8px";
     wrap.appendChild(field);
@@ -416,6 +442,7 @@
     const ok = btnIcon("Verificar", "lock", "btn btn-primary", async () => {
       const val = String(input.value || "").trim();
       if (val.length < 3) { toast("warn","PIN demasiado corto"); return; }
+
       try{
         const h = await sha256Hex(pin.salt + "|" + val);
         if (h !== pin.hash){
@@ -424,8 +451,10 @@
           input.focus();
           return;
         }
+
         st.settings.pin.lastOkAt = nowMs();
         saveState(st);
+
         const r = modalResolve; modalResolve = null;
         closeModal();
         if (r) r(true);
@@ -434,36 +463,87 @@
         console.error(e);
       }
     });
+
     const cancel = btnIcon("Cancelar", "close", "btn btn-ghost", () => {
       const r = modalResolve; modalResolve = null;
       closeModal();
       if (r) r(false);
     });
 
+    // foco
+    setTimeout(() => { try { input.focus(); } catch(_) {} }, 60);
+
     const res = await openModal({ title:"PIN requerido", contentNode: wrap, actions:[cancel, ok] });
-    if (res === null) return false;
     return !!res;
   }
 
-  // ───────────────────────── Detect device / mode ─────────────────────────
+  // ───────────────────────── Detect device / mode + Install ─────────────────────────
+  function isStandalone(){
+    try{
+      if (typeof navigator !== "undefined" && "standalone" in navigator && navigator.standalone) return true; // iOS
+      return window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
+    }catch(_){ return false; }
+  }
+
   function detectMode(){
     const ua = navigator.userAgent || "";
     const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
     const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
-    const isStandalone =
-      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
-      (window.navigator && window.navigator.standalone) || false;
+    const standalone = isStandalone();
 
-    const isDesktop = !isMobileUA && !isTouch;
-    const modeLabel = isStandalone ? "App" : (isMobileUA || isTouch ? "Móvil" : "PC");
+    let label = standalone ? "App" : ((isMobileUA || isTouch) ? "Móvil" : "Desktop");
+    const isOpera = /OPR\//.test(ua) || /Opera/.test(ua);
+    if (!standalone && isOpera) label += " (Opera)";
 
-    document.body.classList.toggle("is-standalone", !!isStandalone);
+    document.body.classList.toggle("is-standalone", !!standalone);
     document.body.classList.toggle("is-mobile", !!(isMobileUA || isTouch));
-    document.body.classList.toggle("is-desktop", !!isDesktop);
+    document.body.classList.toggle("is-desktop", !(isMobileUA || isTouch));
 
     const uiMode = $("#uiMode");
-    if (uiMode) uiMode.textContent = modeLabel;
-    return { isTouch, isMobileUA, isStandalone, isDesktop, modeLabel };
+    if (uiMode) uiMode.textContent = label;
+
+    return { standalone, isTouch, isMobileUA, label };
+  }
+
+  // Install button (Chromium)
+  const btnInstall = $("#btnInstall");
+  let deferredInstallPrompt = null;
+
+  function setupInstallButton(){
+    if (!btnInstall) return;
+
+    // Si ya está instalada, ocultar
+    if (isStandalone()) {
+      btnInstall.hidden = true;
+      return;
+    }
+
+    btnInstall.hidden = true;
+
+    window.addEventListener("beforeinstallprompt", (e) => {
+      try{
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        btnInstall.hidden = false;
+      }catch(_){}
+    });
+
+    window.addEventListener("appinstalled", () => {
+      deferredInstallPrompt = null;
+      btnInstall.hidden = true;
+      detectMode();
+      toast("ok", "App instalada", "ClockIn ya está disponible como aplicación.");
+    });
+
+    btnInstall.addEventListener("click", async () => {
+      try{
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        btnInstall.hidden = true;
+      }catch(_){}
+    });
   }
 
   // ───────────────────────── Service Worker / Auto-update ─────────────────────────
@@ -479,7 +559,6 @@
   function canReloadNow(){
     try{
       const t = Number(localStorage.getItem(RELOAD_GUARD_KEY) || 0);
-      // evita bucles (3s)
       return (nowMs() - t) > 3000;
     }catch(_){ return true; }
   }
@@ -488,21 +567,20 @@
     if (!("serviceWorker" in navigator)) return;
 
     try{
-      // updateViaCache: 'none' ayuda a que el navegador no “sirva” sw.js viejo (cuando soportado)
       swReg = await navigator.serviceWorker.register("./sw.js", { scope: "./", updateViaCache: "none" });
     }catch(e){
       console.warn("SW register failed:", e);
       return;
     }
 
-    // Detecta update
+    // Update found
     swReg.addEventListener("updatefound", () => {
       const installing = swReg.installing;
       if (!installing) return;
+
       installing.addEventListener("statechange", () => {
         if (installing.state === "installed"){
           if (navigator.serviceWorker.controller){
-            // Hay update listo (waiting)
             swWaiting = swReg.waiting || installing;
             showUpdatePill(st, true);
             if (st.settings.autoUpdate) applyUpdateNow(st);
@@ -511,27 +589,24 @@
       });
     });
 
-    // Si ya hay waiting al cargar
+    // waiting at load
     if (swReg.waiting && navigator.serviceWorker.controller){
       swWaiting = swReg.waiting;
       showUpdatePill(st, true);
       if (st.settings.autoUpdate) applyUpdateNow(st);
     }
 
-    // Cuando el nuevo SW toma control
+    // controller change => reload (anti loop)
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      // Anti loop
       if (!canReloadNow()) return;
       markReloadGuard();
       location.reload();
     });
 
-    // Ping periódicamente (suave)
-    // (1) al volver a la pestaña
+    // update checks (suave)
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") swReg?.update().catch(()=>{});
     });
-    // (2) cada ~60min si la app sigue abierta (no agresivo)
     setInterval(() => { swReg?.update().catch(()=>{}); }, 60 * 60 * 1000);
   }
 
@@ -574,15 +649,12 @@
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const c = pos.coords;
-          finish({
-            lat: Number(c.latitude),
-            lon: Number(c.longitude),
-            acc: Number(c.accuracy || 0)
-          });
+          finish({ lat: Number(c.latitude), lon: Number(c.longitude), acc: Number(c.accuracy || 0) });
         },
         () => finish(null),
         opt
       );
+
       setTimeout(() => finish(null), 5200);
     });
   }
@@ -593,7 +665,6 @@
   }
 
   function todaysDOWKey(d){
-    // Lunes=0 -> mon...
     const js = d.getDay(); // 0=Sun
     const map = { 0:"sun", 1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat" };
     return map[js];
@@ -608,20 +679,17 @@
   }
 
   function getEventsForEmpOnDate(st, empId, isoDate){
-    // Los eventos se guardan globales: filtramos por emp y fecha
     const arr = st.events.filter(ev => ev.empId === empId && isSameISODate(ev.ts, isoDate));
     arr.sort((a,b) => a.ts - b.ts);
     return arr;
   }
 
   function deriveDayStats(events, isoDate){
-    // Devuelve: inAt, outAt, breakMins, workedMins, status
     let inAt = null;
     let outAt = null;
     let breakStart = null;
     let breakMins = 0;
 
-    // Detecta estado “actual” a partir del último evento del día
     for (const ev of events){
       if (ev.type === EVT.IN) inAt = ev.ts;
       if (ev.type === EVT.OUT) outAt = ev.ts;
@@ -632,7 +700,6 @@
       }
     }
 
-    // Si hay pausa abierta, la contamos hasta “ahora” si es hoy
     const today = toISODate(new Date());
     const isToday = isoDate === today;
     const endRef = isToday ? nowMs() : (outAt || null);
@@ -647,7 +714,6 @@
       if (end) workedMins = Math.max(0, minutesBetween(inAt, end) - breakMins);
     }
 
-    // Estado
     let status = "Fuera";
     if (inAt && !outAt) status = breakStart ? "En pausa" : "Dentro";
     if (inAt && outAt) status = "Cerrado";
@@ -681,7 +747,7 @@
     try { navigator.vibrate && navigator.vibrate(12); } catch(_) {}
   }
 
-  // ───────────────────────── Render ─────────────────────────
+  // ───────────────────────── Render refs ─────────────────────────
   const splash = $("#splash");
   const splashMsg = $("#splashMsg");
   const splashVer = $("#splashVer");
@@ -738,10 +804,11 @@
   let histPage = 0;
   const HIST_PAGE_SIZE = 120;
 
+  // ───────────────────────── Theme / layout helpers ─────────────────────────
   function applyTheme(theme){
-    // theme: system|dark|light
     if (!theme) theme = "system";
     let t = theme;
+
     if (t === "system"){
       const prefersLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
       t = prefersLight ? "light" : "dark";
@@ -768,25 +835,18 @@
     const n = st.employees.length;
     const today = toISODate(new Date());
     let inside = 0;
+
     for (const emp of st.employees){
       const ev = getEventsForEmpOnDate(st, emp.id, today);
       const ds = deriveDayStats(ev, today);
       if (ds.isInside) inside++;
     }
+
     uiCounts.textContent = `${n} empleados · ${inside} dentro`;
   }
 
-  function pillForStatus(ds){
+  function pillText(text){
     const p = el("span", "pill");
-    if (ds.status === "Dentro") p.classList.add("ok");
-    if (ds.status === "En pausa") p.classList.add("warn");
-    p.textContent = ds.status;
-    return p;
-  }
-
-  function pillText(text, variant){
-    const p = el("span", "pill");
-    if (variant) p.classList.add(variant);
     p.textContent = text;
     return p;
   }
@@ -802,17 +862,19 @@
 
   async function promptNoteIfNeeded(st, actionLabel){
     if (st.settings.noteMode === "never") return "";
+
     const wrap = el("div");
     const p = el("div", "muted");
     p.style.lineHeight = "1.55";
     p.textContent = `Nota (opcional) para: ${actionLabel}`;
+
     const field = el("label", "field");
-    const span = el("span");
-    span.textContent = "Nota";
+    const span = el("span"); span.textContent = "Nota";
     const ta = document.createElement("textarea");
     ta.placeholder = "Ej: Llegó 10 min tarde, Cambio de turno, etc.";
     field.appendChild(span);
     field.appendChild(ta);
+
     wrap.appendChild(p);
     wrap.appendChild(el("div")).style.height = "8px";
     wrap.appendChild(field);
@@ -823,6 +885,7 @@
       closeModal();
       if (r) r(v);
     });
+
     const skip = btnIcon("Sin nota", "notes", "btn btn-ghost", () => {
       const r = modalResolve; modalResolve = null;
       closeModal();
@@ -837,18 +900,16 @@
     const today = toISODate(new Date());
     const events = getEventsForEmpOnDate(st, empId, today);
     const ds = deriveDayStats(events, today);
-
     const emp = getEmployeeById(st, empId);
     if (!emp) return;
 
-    // Si está dentro -> OUT
+    // Dentro -> OUT
     if (ds.isInside){
       if (st.settings.confirmActions){
         const ok = await confirmDialog("Salida", `¿Cerrar salida de "${emp.name}" ahora?`, "Salida", "Cancelar");
         if (!ok) return;
       }
 
-      // Si hay pausa abierta, la cerramos antes de salir (limpio)
       if (ds.breakOpen){
         await addEvent(st, empId, EVT.BREAK_END, "Auto: fin pausa (antes de salida)");
       }
@@ -861,7 +922,7 @@
       return;
     }
 
-    // Si está fuera -> IN
+    // Fuera -> IN
     if (st.settings.confirmActions){
       const ok = await confirmDialog("Entrada", `¿Registrar entrada de "${emp.name}" ahora?`, "Entrada", "Cancelar");
       if (!ok) return;
@@ -909,6 +970,7 @@
     refreshAll(st);
   }
 
+  // ───────────────────────── Panel render ─────────────────────────
   function renderPanelEmployees(st){
     if (!employeeList) return;
     const today = toISODate(new Date());
@@ -926,8 +988,8 @@
       return;
     }
 
-    // Render rápido: fragment
     const frag = document.createDocumentFragment();
+
     for (const emp of st.employees){
       const ev = getEventsForEmpOnDate(st, emp.id, today);
       const ds = deriveDayStats(ev, today);
@@ -943,19 +1005,15 @@
       name.textContent = emp.name;
 
       const sub = el("div", "emp-sub");
+
+      sub.appendChild(pillText(ds.status));
+
       const sched = getScheduleForDate(emp, today);
-      sub.appendChild(pillForStatus(ds));
+      sub.appendChild(pillText(sched ? `${sched.start}–${sched.end}` : "Sin horario"));
 
-      if (sched){
-        sub.appendChild(pillText(`${sched.start}–${sched.end}`));
-      }else{
-        sub.appendChild(pillText("Sin horario", "off"));
-      }
+      sub.appendChild(pillText(`E: ${ds.inAt ? fmtTime(new Date(ds.inAt)) : "—"}`));
+      sub.appendChild(pillText(`S: ${ds.outAt ? fmtTime(new Date(ds.outAt)) : "—"}`));
 
-      const inStr = ds.inAt ? fmtTime(new Date(ds.inAt)) : "—";
-      const outStr = ds.outAt ? fmtTime(new Date(ds.outAt)) : "—";
-      sub.appendChild(pillText(`E: ${inStr}`));
-      sub.appendChild(pillText(`S: ${outStr}`));
       if (ds.breakMins > 0 || ds.breakOpen){
         sub.appendChild(pillText(`Pausa: ${fmtHMFromMinutes(ds.breakMins)}${ds.breakOpen ? " (…)" : ""}`));
       }
@@ -1001,6 +1059,7 @@
     employeeList.appendChild(frag);
   }
 
+  // ───────────────────────── Admin render + CRUD ─────────────────────────
   function renderAdminEmployees(st){
     if (!employeeAdminList) return;
     employeeAdminList.innerHTML = "";
@@ -1013,10 +1072,13 @@
     }
 
     const frag = document.createDocumentFragment();
+
     for (const emp of st.employees){
       const card = el("div", "emp");
+
       const left = el("div", "emp-left");
       const av = el("div", "avatar"); av.textContent = avatarText(emp.name);
+
       const meta = el("div", "emp-meta");
       const name = el("div", "emp-name"); name.textContent = emp.name;
 
@@ -1026,7 +1088,7 @@
         const d = emp.schedule?.[k];
         if (d && d.enabled) bits.push(`${DOW_LABEL[k]} ${d.start}-${d.end}`);
       }
-      sub.appendChild(pillText(bits.length ? bits.join(" · ") : "Sin horario semanal", bits.length ? "" : "off"));
+      sub.appendChild(pillText(bits.length ? bits.join(" · ") : "Sin horario semanal"));
 
       meta.appendChild(name);
       meta.appendChild(sub);
@@ -1044,170 +1106,16 @@
       card.appendChild(right);
       frag.appendChild(card);
     }
+
     employeeAdminList.appendChild(frag);
   }
 
-  function renderSummary(st){
-    if (!summaryTable) return;
-    const tbody = $("tbody", summaryTable);
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    const iso = (sumDate && sumDate.value) ? sumDate.value : toISODate(new Date());
-    const frag = document.createDocumentFragment();
-
-    for (const emp of st.employees){
-      const ev = getEventsForEmpOnDate(st, emp.id, iso);
-      const ds = deriveDayStats(ev, iso);
-      const tr = document.createElement("tr");
-
-      const sched = getScheduleForDate(emp, iso);
-      const schedStr = sched ? `${sched.start}–${sched.end}` : "—";
-
-      const tdName = document.createElement("td"); tdName.textContent = emp.name;
-      const tdSch = document.createElement("td"); tdSch.textContent = schedStr;
-      const tdIn = document.createElement("td"); tdIn.textContent = ds.inAt ? fmtTime(new Date(ds.inAt)) : "—";
-      const tdOut = document.createElement("td"); tdOut.textContent = ds.outAt ? fmtTime(new Date(ds.outAt)) : "—";
-      const tdBreak = document.createElement("td"); tdBreak.textContent = ds.breakMins ? fmtHMFromMinutes(ds.breakMins) : "—";
-      const tdWork = document.createElement("td"); tdWork.textContent = ds.workedMins ? fmtHMFromMinutes(ds.workedMins) : "—";
-      const tdSt = document.createElement("td"); tdSt.textContent = ds.status;
-
-      tr.appendChild(tdName);
-      tr.appendChild(tdSch);
-      tr.appendChild(tdIn);
-      tr.appendChild(tdOut);
-      tr.appendChild(tdBreak);
-      tr.appendChild(tdWork);
-      tr.appendChild(tdSt);
-
-      frag.appendChild(tr);
-    }
-
-    tbody.appendChild(frag);
-
-    if (uiSummaryMeta){
-      const total = st.employees.length;
-      uiSummaryMeta.textContent = `${total} filas · Fecha: ${iso}`;
-    }
-  }
-
-  function computeFilteredEvents(st, filter){
-    let arr = st.events.slice();
-
-    if (filter.empId && filter.empId !== "all"){
-      arr = arr.filter(e => e.empId === filter.empId);
-    }
-    if (filter.from){
-      const fromD = fromISODate(filter.from);
-      if (fromD){
-        const t0 = new Date(fromD.getFullYear(), fromD.getMonth(), fromD.getDate(), 0,0,0,0).getTime();
-        arr = arr.filter(e => e.ts >= t0);
-      }
-    }
-    if (filter.to){
-      const toD = fromISODate(filter.to);
-      if (toD){
-        const t1 = new Date(toD.getFullYear(), toD.getMonth(), toD.getDate(), 23,59,59,999).getTime();
-        arr = arr.filter(e => e.ts <= t1);
-      }
-    }
-    // Más recientes primero para historial
-    arr.sort((a,b) => b.ts - a.ts);
-    return arr;
-  }
-
-  function renderHistory(st, reset=false){
-    if (!eventsTable) return;
-    const tbody = $("tbody", eventsTable);
-    if (!tbody) return;
-
-    if (reset){
-      histPage = 0;
-      tbody.innerHTML = "";
-    }
-
-    const filter = {
-      empId: fEmp ? fEmp.value : "all",
-      from: fFrom ? fFrom.value : "",
-      to: fTo ? fTo.value : ""
-    };
-
-    const all = computeFilteredEvents(st, filter);
-    const start = histPage * HIST_PAGE_SIZE;
-    const end = start + HIST_PAGE_SIZE;
-    const page = all.slice(start, end);
-
-    const frag = document.createDocumentFragment();
-    for (const ev of page){
-      const emp = getEmployeeById(st, ev.empId);
-      const d = new Date(ev.ts);
-
-      const tr = document.createElement("tr");
-
-      const tdD = document.createElement("td"); tdD.textContent = toISODate(d);
-      const tdT = document.createElement("td"); tdT.textContent = fmtTime(d);
-      const tdE = document.createElement("td"); tdE.textContent = emp ? emp.name : ev.empId;
-      const tdTy = document.createElement("td"); tdTy.textContent =
-        ev.type === EVT.IN ? "Entrada" :
-        ev.type === EVT.OUT ? "Salida" :
-        ev.type === EVT.BREAK_START ? "Pausa (inicio)" :
-        ev.type === EVT.BREAK_END ? "Pausa (fin)" :
-        ev.type;
-
-      const tdN = document.createElement("td"); tdN.textContent = ev.note || "—";
-
-      const tdG = document.createElement("td");
-      if (ev.geo && Number.isFinite(ev.geo.lat) && Number.isFinite(ev.geo.lon)){
-        tdG.textContent = `${ev.geo.lat.toFixed(4)}, ${ev.geo.lon.toFixed(4)} ±${Math.round(ev.geo.acc||0)}m`;
-      }else tdG.textContent = "—";
-
-      const tdH = document.createElement("td");
-      tdH.className = "mono";
-      tdH.textContent = ev.hash || "—";
-
-      tr.appendChild(tdD);
-      tr.appendChild(tdT);
-      tr.appendChild(tdE);
-      tr.appendChild(tdTy);
-      tr.appendChild(tdN);
-      tr.appendChild(tdG);
-      tr.appendChild(tdH);
-
-      frag.appendChild(tr);
-    }
-
-    tbody.appendChild(frag);
-
-    const shown = Math.min(end, all.length);
-    if (uiEventCount) uiEventCount.textContent = `${shown} / ${all.length} eventos`;
-
-    if (btnLoadMore){
-      btnLoadMore.hidden = shown >= all.length;
-    }
-  }
-
-  function rebuildHistoryFilters(st){
-    if (!fEmp) return;
-    fEmp.innerHTML = "";
-    const optAll = document.createElement("option");
-    optAll.value = "all";
-    optAll.textContent = "Todos";
-    fEmp.appendChild(optAll);
-
-    for (const emp of st.employees){
-      const o = document.createElement("option");
-      o.value = emp.id;
-      o.textContent = emp.name;
-      fEmp.appendChild(o);
-    }
-  }
-
-  // ───────────────────────── Employee CRUD ─────────────────────────
   async function openAddEmployee(st){
     const wrap = el("div");
+
     const p = el("div", "muted");
     p.style.lineHeight = "1.55";
-    p.textContent = "Crea un empleado y su horario semanal. Puedes editarlo después.";
+    p.textContent = "Crea un empleado. Puedes editar su horario semanal después.";
     wrap.appendChild(p);
 
     const fName = el("label", "field");
@@ -1216,18 +1124,14 @@
     iName.placeholder = "Ej: Laura García";
     fName.appendChild(s1);
     fName.appendChild(iName);
+
     wrap.appendChild(el("div")).style.height = "8px";
     wrap.appendChild(fName);
-
-    // Horario rápido por defecto
-    const hint = el("div", "small muted");
-    hint.style.marginTop = "10px";
-    hint.textContent = "Se aplica un horario por defecto L–V (09:00–17:00).";
-    wrap.appendChild(hint);
 
     const create = btnIcon("Crear", "person_add", "btn btn-primary", () => {
       const name = String(iName.value || "").trim();
       if (!name){ toast("warn", "Nombre requerido"); iName.focus(); return; }
+
       const emp = { id: uid(), name, schedule: defaultSchedule() };
       st.employees.push(emp);
       saveState(st);
@@ -1254,23 +1158,20 @@
   function scheduleRow(k, val){
     const row = el("div");
     row.style.display = "grid";
-    row.style.gridTemplateColumns = "92px 1fr 1fr";
+    row.style.gridTemplateColumns = "1fr 140px 140px";
     row.style.gap = "10px";
     row.style.alignItems = "center";
+
+    const left = el("div");
+    left.style.display = "flex";
+    left.style.alignItems = "center";
+    left.style.justifyContent = "space-between";
+    left.style.gap = "10px";
 
     const label = el("div", "muted");
     label.style.fontWeight = "900";
     label.textContent = DOW_LABEL[k];
 
-    const start = document.createElement("input");
-    start.type = "time";
-    start.value = val.start || "09:00";
-
-    const end = document.createElement("input");
-    end.type = "time";
-    end.value = val.end || "17:00";
-
-    // Checkbox enable integrado (click en label)
     const boxWrap = el("div");
     boxWrap.style.display = "flex";
     boxWrap.style.gap = "10px";
@@ -1287,27 +1188,30 @@
     const lbl = el("div", "small muted");
     lbl.textContent = chk.checked ? "Activo" : "Libre";
 
-    chk.addEventListener("change", () => {
+    boxWrap.appendChild(t);
+    boxWrap.appendChild(lbl);
+
+    left.appendChild(label);
+    left.appendChild(boxWrap);
+
+    const start = document.createElement("input");
+    start.type = "time";
+    start.value = val.start || "09:00";
+
+    const end = document.createElement("input");
+    end.type = "time";
+    end.value = val.end || "17:00";
+
+    const applyEnabled = () => {
       const on = chk.checked;
       start.disabled = !on;
       end.disabled = !on;
       lbl.textContent = on ? "Activo" : "Libre";
       lbl.style.opacity = on ? "1" : ".8";
-    });
+    };
 
-    start.disabled = !chk.checked;
-    end.disabled = !chk.checked;
-
-    boxWrap.appendChild(t);
-    boxWrap.appendChild(lbl);
-
-    // Colocación
-    const left = el("div");
-    left.style.display = "flex";
-    left.style.gap = "10px";
-    left.style.alignItems = "center";
-    left.appendChild(label);
-    left.appendChild(boxWrap);
+    chk.addEventListener("change", applyEnabled);
+    applyEnabled();
 
     row.appendChild(left);
     row.appendChild(start);
@@ -1354,12 +1258,12 @@
 
       for (const k of DOW_KEYS){
         const r = rows[k];
-        const start = String(r.start.value || "09:00");
-        const end = String(r.end.value || "17:00");
+        const startV = String(r.start.value || "09:00");
+        const endV = String(r.end.value || "17:00");
 
-        // Validación suave HH:MM
-        const ps = parseHHMM(start);
-        const pe = parseHHMM(end);
+        const ps = parseHHMM(startV);
+        const pe = parseHHMM(endV);
+
         if (r.chk.checked && (!ps || !pe)){
           toast("warn", `Horario inválido (${DOW_LABEL[k]})`);
           return;
@@ -1404,7 +1308,166 @@
     refreshAll(st);
   }
 
-  // ───────────────────────── Export CSV ─────────────────────────
+  // ───────────────────────── Resumen ─────────────────────────
+  function renderSummary(st){
+    if (!summaryTable) return;
+    const tbody = $("tbody", summaryTable);
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const iso = (sumDate && sumDate.value) ? sumDate.value : toISODate(new Date());
+    const frag = document.createDocumentFragment();
+
+    for (const emp of st.employees){
+      const ev = getEventsForEmpOnDate(st, emp.id, iso);
+      const ds = deriveDayStats(ev, iso);
+      const tr = document.createElement("tr");
+
+      const sched = getScheduleForDate(emp, iso);
+      const schedStr = sched ? `${sched.start}–${sched.end}` : "—";
+
+      const tdName = document.createElement("td"); tdName.textContent = emp.name;
+      const tdSch = document.createElement("td"); tdSch.textContent = schedStr;
+      const tdIn = document.createElement("td"); tdIn.textContent = ds.inAt ? fmtTime(new Date(ds.inAt)) : "—";
+      const tdOut = document.createElement("td"); tdOut.textContent = ds.outAt ? fmtTime(new Date(ds.outAt)) : "—";
+      const tdBreak = document.createElement("td"); tdBreak.textContent = ds.breakMins ? fmtHMFromMinutes(ds.breakMins) : "—";
+      const tdWork = document.createElement("td"); tdWork.textContent = ds.workedMins ? fmtHMFromMinutes(ds.workedMins) : "—";
+      const tdSt = document.createElement("td"); tdSt.textContent = ds.status;
+
+      tr.appendChild(tdName);
+      tr.appendChild(tdSch);
+      tr.appendChild(tdIn);
+      tr.appendChild(tdOut);
+      tr.appendChild(tdBreak);
+      tr.appendChild(tdWork);
+      tr.appendChild(tdSt);
+
+      frag.appendChild(tr);
+    }
+
+    tbody.appendChild(frag);
+
+    if (uiSummaryMeta){
+      uiSummaryMeta.textContent = `${st.employees.length} filas · Fecha: ${iso}`;
+    }
+  }
+
+  // ───────────────────────── Historial ─────────────────────────
+  function computeFilteredEvents(st, filter){
+    let arr = st.events.slice();
+
+    if (filter.empId && filter.empId !== "all"){
+      arr = arr.filter(e => e.empId === filter.empId);
+    }
+
+    if (filter.from){
+      const fromD = fromISODate(filter.from);
+      if (fromD){
+        const t0 = new Date(fromD.getFullYear(), fromD.getMonth(), fromD.getDate(), 0,0,0,0).getTime();
+        arr = arr.filter(e => e.ts >= t0);
+      }
+    }
+
+    if (filter.to){
+      const toD = fromISODate(filter.to);
+      if (toD){
+        const t1 = new Date(toD.getFullYear(), toD.getMonth(), toD.getDate(), 23,59,59,999).getTime();
+        arr = arr.filter(e => e.ts <= t1);
+      }
+    }
+
+    arr.sort((a,b) => b.ts - a.ts);
+    return arr;
+  }
+
+  function renderHistory(st, reset=false){
+    if (!eventsTable) return;
+    const tbody = $("tbody", eventsTable);
+    if (!tbody) return;
+
+    if (reset){
+      histPage = 0;
+      tbody.innerHTML = "";
+    }
+
+    const filter = {
+      empId: fEmp ? fEmp.value : "all",
+      from: fFrom ? fFrom.value : "",
+      to: fTo ? fTo.value : ""
+    };
+
+    const all = computeFilteredEvents(st, filter);
+    const start = histPage * HIST_PAGE_SIZE;
+    const end = start + HIST_PAGE_SIZE;
+    const page = all.slice(start, end);
+
+    const frag = document.createDocumentFragment();
+
+    for (const ev of page){
+      const emp = getEmployeeById(st, ev.empId);
+      const d = new Date(ev.ts);
+
+      const tr = document.createElement("tr");
+
+      const tdD = document.createElement("td"); tdD.textContent = toISODate(d);
+      const tdT = document.createElement("td"); tdT.textContent = fmtTime(d);
+      const tdE = document.createElement("td"); tdE.textContent = emp ? emp.name : ev.empId;
+
+      const tdTy = document.createElement("td");
+      tdTy.textContent =
+        ev.type === EVT.IN ? "Entrada" :
+        ev.type === EVT.OUT ? "Salida" :
+        ev.type === EVT.BREAK_START ? "Pausa (inicio)" :
+        ev.type === EVT.BREAK_END ? "Pausa (fin)" :
+        ev.type;
+
+      const tdN = document.createElement("td"); tdN.textContent = ev.note || "—";
+
+      const tdG = document.createElement("td");
+      if (ev.geo && Number.isFinite(ev.geo.lat) && Number.isFinite(ev.geo.lon)){
+        tdG.textContent = `${ev.geo.lat.toFixed(4)}, ${ev.geo.lon.toFixed(4)} ±${Math.round(ev.geo.acc||0)}m`;
+      } else tdG.textContent = "—";
+
+      const tdH = document.createElement("td");
+      tdH.className = "mono";
+      tdH.textContent = ev.hash || "—";
+
+      tr.appendChild(tdD);
+      tr.appendChild(tdT);
+      tr.appendChild(tdE);
+      tr.appendChild(tdTy);
+      tr.appendChild(tdN);
+      tr.appendChild(tdG);
+      tr.appendChild(tdH);
+
+      frag.appendChild(tr);
+    }
+
+    tbody.appendChild(frag);
+
+    const shown = Math.min(end, all.length);
+    if (uiEventCount) uiEventCount.textContent = `${shown} / ${all.length} eventos`;
+    if (btnLoadMore) btnLoadMore.hidden = shown >= all.length;
+  }
+
+  function rebuildHistoryFilters(st){
+    if (!fEmp) return;
+    fEmp.innerHTML = "";
+
+    const optAll = document.createElement("option");
+    optAll.value = "all";
+    optAll.textContent = "Todos";
+    fEmp.appendChild(optAll);
+
+    for (const emp of st.employees){
+      const o = document.createElement("option");
+      o.value = emp.id;
+      o.textContent = emp.name;
+      fEmp.appendChild(o);
+    }
+  }
+
+  // ───────────────────────── CSV ─────────────────────────
   function exportSummaryCSV(st){
     const iso = (sumDate && sumDate.value) ? sumDate.value : toISODate(new Date());
     const lines = [];
@@ -1414,7 +1477,8 @@
       const ev = getEventsForEmpOnDate(st, emp.id, iso);
       const ds = deriveDayStats(ev, iso);
       const sched = getScheduleForDate(emp, iso);
-      const row = [
+
+      lines.push([
         emp.name,
         sched ? `${sched.start}-${sched.end}` : "",
         ds.inAt ? fmtTime(new Date(ds.inAt)) : "",
@@ -1422,8 +1486,7 @@
         ds.breakMins ? fmtHMFromMinutes(ds.breakMins) : "",
         ds.workedMins ? fmtHMFromMinutes(ds.workedMins) : "",
         ds.status
-      ];
-      lines.push(row.map(csvEscape).join(","));
+      ].map(csvEscape).join(","));
     }
 
     downloadText(`clockin_resumen_${iso}.csv`, lines.join("\n"), "text/csv;charset=utf-8");
@@ -1435,6 +1498,7 @@
       from: fFrom ? fFrom.value : "",
       to: fTo ? fTo.value : ""
     };
+
     const arr = computeFilteredEvents(st, filter);
 
     const lines = [];
@@ -1443,7 +1507,7 @@
     for (const ev of arr){
       const emp = getEmployeeById(st, ev.empId);
       const d = new Date(ev.ts);
-      const row = [
+      lines.push([
         toISODate(d),
         fmtTime(d),
         emp ? emp.name : ev.empId,
@@ -1453,8 +1517,7 @@
         ev.geo?.lon ?? "",
         ev.geo?.acc ?? "",
         ev.hash || ""
-      ];
-      lines.push(row.map(csvEscape).join(","));
+      ].map(csvEscape).join(","));
     }
 
     const stamp = toISODate(new Date());
@@ -1465,6 +1528,7 @@
   async function doBackup(st){
     const ok = await ensurePinOk(st, "exportar (backup)");
     if (!ok) return;
+
     const payload = JSON.stringify(st, null, 2);
     downloadText(`clockin_backup_${toISODate(new Date())}.json`, payload, "application/json;charset=utf-8");
     toast("ok", "Backup descargado");
@@ -1490,7 +1554,7 @@
     const fresh = defaultState();
     saveState(fresh);
     toast("ok", "Datos borrados");
-    // recarga estado en memoria (sin reload)
+
     state = fresh;
     applySettingsToUI(state);
     refreshAll(state);
@@ -1498,15 +1562,12 @@
 
   // ───────────────────────── Settings UI ─────────────────────────
   function applySettingsToUI(st){
-    // version
     if (uiVer) uiVer.textContent = APP_VERSION;
     if (splashVer) splashVer.textContent = APP_VERSION;
 
-    // theme
     if (optTheme) optTheme.value = st.settings.theme || "system";
     applyTheme(st.settings.theme);
 
-    // toggles
     if (optAutoUpdate) optAutoUpdate.checked = !!st.settings.autoUpdate;
     if (optConfirmActions) optConfirmActions.checked = !!st.settings.confirmActions;
     if (optNoteMode) optNoteMode.value = st.settings.noteMode || "ask";
@@ -1518,59 +1579,51 @@
   }
 
   function bindSettings(st){
-    if (optTheme){
-      optTheme.addEventListener("change", () => {
-        st.settings.theme = optTheme.value;
-        applyTheme(st.settings.theme);
-        saveState(st);
-      });
-    }
-    if (optAutoUpdate){
-      optAutoUpdate.addEventListener("change", () => {
-        st.settings.autoUpdate = !!optAutoUpdate.checked;
-        saveState(st);
-        toast("info", "Auto-update", st.settings.autoUpdate ? "Activado" : "Desactivado");
-        // Si hay waiting y lo activas, aplica
-        if (st.settings.autoUpdate && (swWaiting || swReg?.waiting)) applyUpdateNow(st);
-      });
-    }
-    if (optConfirmActions){
-      optConfirmActions.addEventListener("change", () => {
-        st.settings.confirmActions = !!optConfirmActions.checked;
-        saveState(st);
-      });
-    }
-    if (optNoteMode){
-      optNoteMode.addEventListener("change", () => {
-        st.settings.noteMode = optNoteMode.value;
-        saveState(st);
-      });
-    }
-    if (optCompact){
-      optCompact.addEventListener("change", () => {
-        st.settings.compact = !!optCompact.checked;
-        setCompact(st.settings.compact);
-        saveState(st);
-      });
-    }
-    if (optHaptics){
-      optHaptics.addEventListener("change", () => {
-        st.settings.haptics = !!optHaptics.checked;
-        saveState(st);
-      });
-    }
-    if (tglGeo){
-      tglGeo.addEventListener("change", () => {
-        st.settings.geoEnabled = !!tglGeo.checked;
-        saveState(st);
-        toast("info", "Geolocalización", st.settings.geoEnabled ? "Activada" : "Desactivada");
-      });
-    }
+    optTheme?.addEventListener("change", () => {
+      st.settings.theme = optTheme.value;
+      applyTheme(st.settings.theme);
+      saveState(st);
+    });
+
+    optAutoUpdate?.addEventListener("change", () => {
+      st.settings.autoUpdate = !!optAutoUpdate.checked;
+      saveState(st);
+      toast("info", "Auto-update", st.settings.autoUpdate ? "Activado" : "Desactivado");
+      if (st.settings.autoUpdate && (swWaiting || swReg?.waiting)) applyUpdateNow(st);
+    });
+
+    optConfirmActions?.addEventListener("change", () => {
+      st.settings.confirmActions = !!optConfirmActions.checked;
+      saveState(st);
+    });
+
+    optNoteMode?.addEventListener("change", () => {
+      st.settings.noteMode = optNoteMode.value;
+      saveState(st);
+    });
+
+    optCompact?.addEventListener("change", () => {
+      st.settings.compact = !!optCompact.checked;
+      setCompact(st.settings.compact);
+      saveState(st);
+    });
+
+    optHaptics?.addEventListener("change", () => {
+      st.settings.haptics = !!optHaptics.checked;
+      saveState(st);
+    });
+
+    tglGeo?.addEventListener("change", () => {
+      st.settings.geoEnabled = !!tglGeo.checked;
+      saveState(st);
+      toast("info", "Geolocalización", st.settings.geoEnabled ? "Activada" : "Desactivada");
+    });
   }
 
   // ───────────────────────── PIN UI ─────────────────────────
   async function openSetPin(st){
     const wrap = el("div");
+
     const p = el("div", "muted");
     p.style.lineHeight = "1.55";
     p.textContent = "Configura un PIN para proteger import/export y borrados. (Se guarda hasheado).";
@@ -1611,6 +1664,7 @@
         st.settings.pin.lastOkAt = nowMs();
         saveState(st);
         toast("ok","PIN configurado");
+
         const r = modalResolve; modalResolve = null;
         closeModal();
         if (r) r(true);
@@ -1634,12 +1688,15 @@
       toast("info","No hay PIN configurado");
       return;
     }
+
     const ok = await ensurePinOk(st, "quitar el PIN");
     if (!ok) return;
+
     if (st.settings.confirmActions){
       const sure = await confirmDialog("Quitar PIN", "Se quitará la protección. ¿Continuar?", "Quitar", "Cancelar");
       if (!sure) return;
     }
+
     st.settings.pin.enabled = false;
     st.settings.pin.salt = "";
     st.settings.pin.hash = "";
@@ -1654,15 +1711,12 @@
       t.classList.toggle("is-active", t.dataset.route === route);
     }
 
-    // Transición suave
     for (const v of views){
       if (v.dataset.route === route){
         v.hidden = false;
         v.classList.add("view-enter");
         requestAnimationFrame(() => v.classList.add("is-entering"));
-        setTimeout(() => {
-          v.classList.remove("view-enter", "is-entering");
-        }, 240);
+        setTimeout(() => v.classList.remove("view-enter", "is-entering"), 240);
       }else if (!v.hidden){
         v.classList.add("view-exit");
         requestAnimationFrame(() => v.classList.add("is-exiting"));
@@ -1673,7 +1727,6 @@
       }
     }
 
-    // Actualiza cosas específicas
     if (route === "resumen") renderSummary(state);
     if (route === "historial") renderHistory(state, true);
   }
@@ -1696,26 +1749,31 @@
     renderHistory(st, true);
   }
 
-  // ───────────────────────── Events binding ─────────────────────────
+  // ───────────────────────── Binding ─────────────────────────
   function bindPanelActions(st){
-    // Event delegation: más rendimiento y menos listeners
-    if (employeeList){
-      employeeList.addEventListener("click", async (e) => {
-        const btn = e.target && e.target.closest ? e.target.closest("button[data-action]") : null;
-        if (!btn) return;
-        const empId = btn.dataset.empId;
-        const act = btn.dataset.action;
-        if (!empId || !act) return;
+    if (!employeeList) return;
 
+    employeeList.addEventListener("click", async (e) => {
+      const b = e.target && e.target.closest ? e.target.closest("button[data-action]") : null;
+      if (!b) return;
+
+      const empId = b.dataset.empId;
+      const act = b.dataset.action;
+      if (!empId || !act) return;
+
+      b.disabled = true;
+      try{
         if (act === "toggle-inout") await onToggleInOut(st, empId);
         if (act === "toggle-break") await onToggleBreak(st, empId);
-      });
-    }
+      } finally {
+        b.disabled = false;
+      }
+    });
   }
 
   function bindSummary(st){
     if (!sumDate) return;
-    // Inicializa fecha
+
     if (!sumDate.value) sumDate.value = toISODate(new Date());
     sumDate.addEventListener("change", () => renderSummary(st));
 
@@ -1725,6 +1783,7 @@
       sumDate.value = toISODate(d);
       renderSummary(st);
     });
+
     btnSumNext?.addEventListener("click", () => {
       const d = fromISODate(sumDate.value) || new Date();
       d.setDate(d.getDate()+1);
@@ -1742,6 +1801,7 @@
 
   function bindHistory(st){
     btnApplyFilters?.addEventListener("click", () => renderHistory(st, true));
+
     btnClearFilters?.addEventListener("click", () => {
       if (fEmp) fEmp.value = "all";
       if (fFrom) fFrom.value = "";
@@ -1764,7 +1824,6 @@
 
   function bindEmployeeButtons(st){
     const openAdd = () => openAddEmployee(st);
-
     btnQuickAdd?.addEventListener("click", openAdd);
     fabAdd?.addEventListener("click", openAdd);
     btnAddEmp?.addEventListener("click", openAdd);
@@ -1789,10 +1848,7 @@
             return;
           }
 
-          // Rehidratamos mediante load/repair suave:
-          // - no usamos directamente incoming para evitar romper la UI
           try{
-            // Guardamos incoming crudo, y luego lo leemos y normalizamos con loadState
             localStorage.setItem(STORAGE_KEY, JSON.stringify(incoming));
             state = loadState();
             applySettingsToUI(state);
@@ -1815,46 +1871,55 @@
 
   // Close modal
   modalClose?.addEventListener("click", closeModal);
-  modalBackdrop?.addEventListener("click", (e) => {
-    if (e.target === modalBackdrop) closeModal();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && modalBackdrop && !modalBackdrop.hidden) closeModal();
-  });
+  modalBackdrop?.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && modalBackdrop && !modalBackdrop.hidden) closeModal(); });
 
-  // ───────────────────────── Online/Offline & clock tick ─────────────────────────
+  // ───────────────────────── Online/Offline & ticks ─────────────────────────
   window.addEventListener("online", () => setOfflineBadge());
   window.addEventListener("offline", () => setOfflineBadge());
 
-  // Actualiza header cada minuto (barato)
-  setInterval(() => {
-    setHeaderDate();
-  }, 60 * 1000);
+  setInterval(() => { setHeaderDate(); }, 60 * 1000);
 
-  // ───────────────────────── Init ─────────────────────────
-  let state = loadState();
+  // ───────────────────────── Splash FIX (Opera GX / overlays) ─────────────────────────
+  function forceSplashNonBlocking(){
+    if (!splash) return;
+    // Aunque el CSS ya lo hace, aquí lo blindamos por JS.
+    splash.style.pointerEvents = "none";
+  }
 
   function hideSplash(){
     if (!splash) return;
     if (splashMsg) splashMsg.textContent = "Listo";
+
     splash.classList.add("is-hidden");
-    setTimeout(() => { splash.style.display = "none"; }, 260);
+
+    setTimeout(() => {
+      try{
+        splash.hidden = true;          // ✅ clave
+        splash.style.display = "none"; // ✅ clave
+        splash.style.pointerEvents = "none";
+      }catch(_){}
+    }, 260);
   }
 
+  // ───────────────────────── Init ─────────────────────────
+  let state = loadState();
+
   function init(){
+    // Hard safety: si por cualquier razón el modalBackdrop se queda visible
+    hardHideBackdrop();
+    forceSplashNonBlocking();
+
     if (splashMsg) splashMsg.textContent = "Inicializando…";
 
-    // Detect mode (PC/Móvil/App)
     detectMode();
+    setupInstallButton();
 
-    // Settings
     applySettingsToUI(state);
     bindSettings(state);
 
-    // SW
     registerSW(state);
 
-    // UI
     bindTabs();
     bindPanelActions(state);
     bindSummary(state);
@@ -1863,26 +1928,22 @@
     bindDataButtons(state);
     bindPinButtons(state);
 
-    // Inicializa resumen con hoy
     if (sumDate && !sumDate.value) sumDate.value = toISODate(new Date());
 
-    // Filtros historia defaults
     rebuildHistoryFilters(state);
-
-    // Render
     refreshAll(state);
 
-    // Mostrar UI
     hideSplash();
   }
 
-  // Boot
   try{
     init();
   }catch(e){
     console.error(e);
     toast("error", "Error crítico", "Usa Repair si se queda atascado.");
     if (splashMsg) splashMsg.textContent = "Error al iniciar";
+    // Aun así, intenta liberar la UI
+    try { hideSplash(); } catch(_) {}
   }
 
 })();
